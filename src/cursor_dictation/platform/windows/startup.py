@@ -47,9 +47,16 @@ class WinRegistry:
 class StartupManager:
     _VALUE_NAME = "Cursor Dictation"
 
-    def __init__(self, registry: RegistryPort, executable_path: str) -> None:
+    def __init__(
+        self,
+        registry: RegistryPort,
+        executable_path: str,
+        *,
+        base_arguments: tuple[str, ...] = (),
+    ) -> None:
         self._registry = registry
-        self._command = f"{quote_windows_argument(executable_path)} --startup"
+        arguments = subprocess.list2cmdline([*base_arguments, "--startup"])
+        self._command = f"{quote_windows_argument(executable_path)} {arguments}"
 
     def is_enabled(self) -> bool:
         return self._registry.read(self._VALUE_NAME) == self._command

@@ -16,6 +16,10 @@ def test_overlay_maps_runtime_states_to_short_status(qtbot) -> None:  # type: ig
     assert overlay.status_text == "Transcribing locally..."
     assert overlay.is_active
 
+    overlay.set_state(AppState.LOADING_MODEL)
+    assert overlay.status_text == "Loading local model..."
+    assert overlay.is_active
+
     overlay.set_state(AppState.IDLE)
     assert overlay.status_text == "Ready"
     assert not overlay.is_active

@@ -31,6 +31,19 @@ def test_enable_writes_quoted_executable_and_startup_flag() -> None:
     assert manager.is_enabled()
 
 
+def test_source_launch_can_include_module_arguments() -> None:
+    registry = FakeRegistry()
+    manager = StartupManager(
+        registry,
+        "C:\\Python311\\pythonw.exe",
+        base_arguments=("-m", "cursor_dictation"),
+    )
+
+    manager.set_enabled(True)
+
+    assert registry.value == '"C:\\Python311\\pythonw.exe" -m cursor_dictation --startup'
+
+
 def test_disable_removes_only_owned_value() -> None:
     registry = FakeRegistry(value='"C:\\Other App\\other.exe"')
     manager = StartupManager(registry, "C:\\Cursor Dictation\\app.exe")

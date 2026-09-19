@@ -24,7 +24,10 @@ class AppPaths:
 
     @classmethod
     def from_local_app_data(cls, local_app_data: Path) -> AppPaths:
-        root = local_app_data / "CursorDictation"
+        return cls.from_root(local_app_data / "CursorDictation")
+
+    @classmethod
+    def from_root(cls, root: Path) -> AppPaths:
         return cls(
             root=root,
             settings_file=root / "settings.json",

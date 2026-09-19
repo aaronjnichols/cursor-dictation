@@ -69,6 +69,10 @@ class StatusOverlay(QWidget):
             self._active = True
             self._status_label.setText("Transcribing locally...")
             self._show_without_focus()
+        elif state is AppState.LOADING_MODEL:
+            self._active = True
+            self._status_label.setText("Loading local model...")
+            self._show_without_focus()
         elif state is AppState.DELIVERING:
             self._active = True
             self._status_label.setText("Inserting text...")

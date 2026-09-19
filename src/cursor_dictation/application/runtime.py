@@ -46,6 +46,7 @@ class DictationRuntime(QObject):
         self._tray = tray
         self._overlay = overlay
         self._hold_active = False
+        self._enabled = True
 
         hotkeys.hold_pressed.connect(self._hold_pressed)
         hotkeys.hold_released.connect(self._hold_released)
@@ -69,6 +70,9 @@ class DictationRuntime(QObject):
         if self._controller.state is AppState.RECORDING:
             self._controller.cancel()
 
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = enabled
+
     def poll_audio_completion(self) -> None:
         if self._controller.state is not AppState.RECORDING:
             return
@@ -82,6 +86,8 @@ class DictationRuntime(QObject):
             self._controller.stop_recording()
 
     def _hold_pressed(self) -> None:
+        if not self._can_start():
+            return
         if self._hold_active:
             return
         if self._controller.state is not AppState.IDLE:
@@ -106,6 +112,8 @@ class DictationRuntime(QObject):
     def _toggle(self, mode: DeliveryMode) -> None:
         state = self._controller.state
         if state is AppState.IDLE:
+            if not self._can_start():
+                return
             self._tray.set_recording_mode(mode)
             self._controller.start_recording(mode)
         elif state is AppState.RECORDING:
@@ -129,3 +137,9 @@ class DictationRuntime(QObject):
             self._overlay.show_copied()
         else:
             self._overlay.show_inserted()
+
+    def _can_start(self) -> bool:
+        if self._enabled:
+            return True
+        self._overlay.show_error("Close Settings to start dictation")
+        return False

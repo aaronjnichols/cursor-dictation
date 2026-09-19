@@ -19,6 +19,16 @@ def test_app_paths_stay_below_local_app_data(tmp_path: Path) -> None:
     assert paths.downloads_dir == paths.root / "downloads"
 
 
+def test_explicit_root_is_used_for_smoke_tests_and_portable_diagnostics(tmp_path: Path) -> None:
+    root = tmp_path / "isolated-data"
+
+    paths = AppPaths.from_root(root)
+
+    assert paths.root == root
+    assert paths.settings_file == root / "settings.json"
+    assert paths.models_dir == root / "models"
+
+
 def test_ensure_directories_creates_only_owned_folders(tmp_path: Path) -> None:
     paths = AppPaths.from_local_app_data(tmp_path)
 

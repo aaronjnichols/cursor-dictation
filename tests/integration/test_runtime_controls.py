@@ -146,3 +146,15 @@ def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type:
     assert recorder.starts == 1
     assert overlay.status_text == "Transcribing..."
     runtime.close()
+
+
+def test_disabled_runtime_rejects_hotkeys_while_settings_are_open(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
+    runtime.set_enabled(False)
+
+    hotkeys.toggle_pressed.emit()
+
+    assert controller.state is AppState.IDLE
+    assert recorder.starts == 0
+    assert overlay.status_text == "Close Settings to start dictation"
+    runtime.close()
