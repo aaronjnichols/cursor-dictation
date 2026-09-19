@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cursor_dictation.core.models import AppState
+from cursor_dictation.core.models import AppState, DeliveryMode
 from cursor_dictation.ui.tray import TrayIcon
 
 
@@ -29,9 +29,15 @@ def test_tray_actions_follow_application_state() -> None:
     assert not tray.cancel_action.isEnabled()
 
     tray.set_state(AppState.RECORDING)
-    assert not tray.start_action.isEnabled()
+    assert tray.start_action.isEnabled()
+    assert tray.start_action.text() == "Stop dictation"
     assert not tray.copy_action.isEnabled()
     assert tray.cancel_action.isEnabled()
+
+    tray.set_recording_mode(DeliveryMode.COPY)
+    assert not tray.start_action.isEnabled()
+    assert tray.copy_action.isEnabled()
+    assert tray.copy_action.text() == "Stop and copy"
 
     tray.set_state(AppState.TRANSCRIBING)
     assert not tray.start_action.isEnabled()

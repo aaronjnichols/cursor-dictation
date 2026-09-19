@@ -88,6 +88,9 @@ class StatusOverlay(QWidget):
     def show_copied(self) -> None:
         self._show_feedback("Copied", 1600)
 
+    def show_inserted(self) -> None:
+        self._show_feedback("Inserted", 1200)
+
     def show_error(self, message: str) -> None:
         self._show_feedback(message, 3500)
 

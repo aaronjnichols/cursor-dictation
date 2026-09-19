@@ -4,7 +4,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
 
-from cursor_dictation.core.models import AppState
+from cursor_dictation.core.models import AppState, DeliveryMode
 from cursor_dictation.ui.icons import make_app_icon
 
 
@@ -40,13 +40,25 @@ class TrayIcon(QSystemTrayIcon):
         menu.addSeparator()
         menu.addAction(self.quit_action)
         self.setContextMenu(menu)
+        self._state = AppState.IDLE
+        self._recording_mode = DeliveryMode.INSERT
         self.set_state(AppState.IDLE)
 
+    def set_recording_mode(self, mode: DeliveryMode) -> None:
+        self._recording_mode = mode
+        if self._state is AppState.RECORDING:
+            self.set_state(self._state)
+
     def set_state(self, state: AppState) -> None:
+        self._state = state
         idle = state is AppState.IDLE
         recording = state is AppState.RECORDING
-        self.start_action.setEnabled(idle)
-        self.copy_action.setEnabled(idle)
+        insert_recording = recording and self._recording_mode is DeliveryMode.INSERT
+        copy_recording = recording and self._recording_mode is DeliveryMode.COPY
+        self.start_action.setText("Stop dictation" if insert_recording else "Start dictation")
+        self.copy_action.setText("Stop and copy" if copy_recording else "Record and copy")
+        self.start_action.setEnabled(idle or insert_recording)
+        self.copy_action.setEnabled(idle or copy_recording)
         self.cancel_action.setEnabled(recording)
         label = {
             AppState.RECORDING: "Recording",
