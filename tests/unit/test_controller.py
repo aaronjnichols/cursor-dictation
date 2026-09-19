@@ -73,10 +73,20 @@ class FakeDelivery:
         return DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY)
 
 
+@dataclass
+class FakeHistory:
+    entries: list[tuple[str, str]] = field(default_factory=list)
+
+    def append(self, text: str, mode: str) -> None:
+        self.entries.append((text, mode))
+
+
 def make_controller(
     *,
     vocabulary: Callable[[], Sequence[str]] | None = None,
     observer_error: Callable[[Exception], None] | None = None,
+    history: FakeHistory | None = None,
+    completion_listener: Callable[[DeliveryMode, DeliveryResult], None] | None = None,
 ) -> tuple[DictationController, FakeRecorder, FakeTranscriptionQueue, FakeDelivery]:
     recorder = FakeRecorder()
     queue = FakeTranscriptionQueue()
@@ -89,6 +99,8 @@ def make_controller(
         selected_device=lambda: "microphone-1",
         session_ids=iter(("session-1", "session-2", "session-3")).__next__,
         observer_error=observer_error,
+        history=history,
+        completion_listener=completion_listener,
     )
     return controller, recorder, queue, delivery
 
@@ -277,3 +289,48 @@ def test_recovery_copy_exception_keeps_transcript_available() -> None:
     assert controller.state is AppState.ERROR_WITH_TRANSCRIPT
     assert controller.last_transcript == "Keep this available."
     assert controller.last_error == "clipboard locked"
+
+
+def test_successful_delivery_is_added_to_enabled_history() -> None:
+    history = FakeHistory()
+    controller, _, queue, _ = make_controller(history=history)
+    controller.start_recording(DeliveryMode.COPY)
+    controller.stop_recording()
+
+    queue.succeed("Remember this.")
+
+    assert history.entries == [("Remember this.", "copy")]
+
+
+def test_history_failure_does_not_turn_delivered_text_into_an_app_error() -> None:
+    observer_errors: list[Exception] = []
+
+    class FailedHistory(FakeHistory):
+        def append(self, text: str, mode: str) -> None:
+            raise RuntimeError("history unavailable")
+
+    controller, _, queue, delivery = make_controller(
+        history=FailedHistory(),
+        observer_error=observer_errors.append,
+    )
+    controller.start_recording(DeliveryMode.INSERT)
+    controller.stop_recording()
+
+    queue.succeed("Already delivered.")
+
+    assert delivery.inserted == ["Already delivered."]
+    assert controller.state is AppState.IDLE
+    assert [str(error) for error in observer_errors] == ["history unavailable"]
+
+
+def test_completion_listener_receives_mode_and_delivery_method() -> None:
+    completions: list[tuple[DeliveryMode, DeliveryResult]] = []
+    controller, _, queue, _ = make_controller(
+        completion_listener=lambda *value: completions.append(value)
+    )
+    controller.start_recording(DeliveryMode.COPY)
+    controller.stop_recording()
+
+    queue.succeed("Copied.")
+
+    assert completions == [(DeliveryMode.COPY, DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY))]

@@ -3,11 +3,17 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 
-from cursor_dictation.application.ports import AudioRecorder, TextDelivery, TranscriptionQueue
+from cursor_dictation.application.ports import (
+    AudioRecorder,
+    TextDelivery,
+    TranscriptHistory,
+    TranscriptionQueue,
+)
 from cursor_dictation.core.events import Event
 from cursor_dictation.core.models import (
     AppState,
     DeliveryMode,
+    DeliveryResult,
     Transcript,
     TranscriptionRequest,
 )
@@ -27,6 +33,8 @@ class DictationController:
         selected_device: Callable[[], str | None],
         session_ids: Callable[[], str],
         observer_error: Callable[[Exception], None] | None = None,
+        history: TranscriptHistory | None = None,
+        completion_listener: Callable[[DeliveryMode, DeliveryResult], None] | None = None,
         initial_state: AppState = AppState.IDLE,
     ) -> None:
         self._recorder = recorder
@@ -36,6 +44,8 @@ class DictationController:
         self._selected_device = selected_device
         self._session_ids = session_ids
         self._observer_error = observer_error
+        self._history = history
+        self._completion_listener = completion_listener
         self._state = initial_state
         self._active_session: str | None = None
         self._delivery_mode: DeliveryMode | None = None
@@ -178,6 +188,16 @@ class DictationController:
         self.last_error = None
         self.last_transcript = None
         self._move(Event.DELIVERY_COMPLETED)
+        if self._history is not None:
+            try:
+                self._history.append(text, mode.value)
+            except Exception as error:
+                self._report_observer_error(error)
+        if self._completion_listener is not None:
+            try:
+                self._completion_listener(mode, result)
+            except Exception as error:
+                self._report_observer_error(error)
 
     def _transcription_failed(self, session_id: str, error: Exception) -> None:
         if session_id != self._active_session or self._state is not AppState.TRANSCRIBING:
@@ -194,9 +214,12 @@ class DictationController:
             try:
                 listener(self._state)
             except Exception as error:
-                if self._observer_error is not None:
-                    with suppress(Exception):
-                        self._observer_error(error)
+                self._report_observer_error(error)
+
+    def _report_observer_error(self, error: Exception) -> None:
+        if self._observer_error is not None:
+            with suppress(Exception):
+                self._observer_error(error)
 
     def _require_session(self) -> str:
         if self._active_session is None:
