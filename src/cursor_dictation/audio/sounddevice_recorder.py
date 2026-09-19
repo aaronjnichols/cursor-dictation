@@ -6,6 +6,7 @@ from threading import Event, RLock
 from typing import Protocol, cast
 
 import numpy as np
+import soxr
 from numpy.typing import NDArray
 
 from cursor_dictation.audio.recorder import (
@@ -468,14 +469,12 @@ def _resample_mono(
 ) -> NDArray[np.float32]:
     if samples.size == 0 or input_sample_rate == output_sample_rate:
         return samples
-    output_count = max(1, round(samples.size * output_sample_rate / input_sample_rate))
-    source_positions = np.arange(output_count, dtype=np.float64) * (
-        input_sample_rate / output_sample_rate
+    return np.asarray(
+        soxr.resample(
+            samples,
+            input_sample_rate,
+            output_sample_rate,
+            quality="HQ",
+        ),
+        dtype=np.float32,
     )
-    source_positions = np.minimum(source_positions, samples.size - 1)
-    resampled = np.interp(
-        source_positions,
-        np.arange(samples.size, dtype=np.float64),
-        samples,
-    )
-    return resampled.astype(np.float32, copy=False)

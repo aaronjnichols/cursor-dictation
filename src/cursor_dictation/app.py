@@ -33,6 +33,8 @@ from cursor_dictation.ui.theme import build_stylesheet
 
 def main(argv: Sequence[str] | None = None) -> int:
     options = _parser().parse_args(argv)
+    if options.smoke_test:
+        _smoke_inference_imports()
     application = QApplication(["cursor-dictation"])
     application.setApplicationName("Cursor Dictation")
     application.setOrganizationName("Cursor Dictation")
@@ -108,6 +110,13 @@ def _startup_command() -> tuple[str, tuple[str, ...]]:
     pythonw = python.with_name("pythonw.exe")
     executable = pythonw if pythonw.is_file() else python
     return str(executable), ("-m", "cursor_dictation")
+
+
+def _smoke_inference_imports() -> None:
+    from faster_whisper import WhisperModel
+
+    if WhisperModel is None:
+        raise RuntimeError("The local transcription runtime could not be imported")
 
 
 def _parser() -> argparse.ArgumentParser:

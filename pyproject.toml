@@ -17,6 +17,7 @@ dependencies = [
   "PySide6>=6.8,<7",
   "pywin32>=308; sys_platform == 'win32'",
   "requests>=2.32,<3",
+  "soxr>=1,<2",
   "sounddevice>=0.5,<1",
 ]
 
@@ -38,7 +39,7 @@ packages = ["src/cursor_dictation"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 markers = [
   "live_audio: requires a real microphone",
@@ -64,7 +65,7 @@ packages = ["cursor_dictation"]
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["sounddevice.*", "faster_whisper.*", "win32api.*", "win32con.*", "win32gui.*"]
+module = ["sounddevice.*", "soxr.*", "faster_whisper.*", "win32api.*", "win32con.*", "win32gui.*"]
 ignore_missing_imports = true
 
 [tool.coverage.run]

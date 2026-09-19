@@ -12,7 +12,7 @@ from cursor_dictation.audio.recorder import (
     RecorderNotRunningError,
     RecordingCompletionReason,
 )
-from cursor_dictation.audio.sounddevice_recorder import SoundDeviceRecorder
+from cursor_dictation.audio.sounddevice_recorder import SoundDeviceRecorder, _resample_mono
 
 
 class FakeCallbackStop(Exception):
@@ -240,6 +240,29 @@ def test_device_native_capture_is_resampled_when_16khz_is_rejected() -> None:
     assert len(audio.samples) == 160
     assert audio.duration_seconds == pytest.approx(0.01)
     assert np.asarray(audio.samples).dtype == np.float32
+
+
+def test_native_rate_resampler_attenuates_energy_above_whisper_band() -> None:
+    sample_rate = 48_000
+    time_axis = np.arange(sample_rate // 10, dtype=np.float64) / sample_rate
+    high_frequency = np.sin(2 * np.pi * 12_000 * time_axis).astype(np.float32)
+    speech_band = np.sin(2 * np.pi * 1_000 * time_axis).astype(np.float32)
+
+    rejected = _resample_mono(
+        high_frequency,
+        input_sample_rate=sample_rate,
+        output_sample_rate=16_000,
+    )
+    retained = _resample_mono(
+        speech_band,
+        input_sample_rate=sample_rate,
+        output_sample_rate=16_000,
+    )
+
+    rejected_rms = float(np.sqrt(np.mean(np.square(rejected, dtype=np.float32))))
+    retained_rms = float(np.sqrt(np.mean(np.square(retained, dtype=np.float32))))
+    assert rejected_rms < 0.05
+    assert retained_rms > 0.6
 
 
 def test_cancel_closes_stream_and_discards_buffer() -> None:
