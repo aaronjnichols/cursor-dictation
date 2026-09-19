@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from PySide6.QtCore import QByteArray, QEventLoop, QMimeData, QTimer
-from PySide6.QtGui import QClipboard, QGuiApplication
+from PySide6.QtGui import QClipboard, QGuiApplication, QImage, QPixmap
+
+from cursor_dictation.output.delivery import ClipboardTransactionError
 
 
 @dataclass(frozen=True, slots=True)
 class MimeSnapshot:
     payloads: tuple[tuple[str, bytes], ...]
+    image: QImage | None = None
 
     @classmethod
     def capture(cls, mime_data: QMimeData | None) -> MimeSnapshot:
@@ -20,13 +23,16 @@ class MimeSnapshot:
             payloads=tuple(
                 (mime_type, _copy_bytes(mime_data.data(mime_type).data()))
                 for mime_type in mime_data.formats()
-            )
+            ),
+            image=_copy_image(mime_data),
         )
 
     def to_mime_data(self) -> QMimeData:
         mime_data = QMimeData()
         for mime_type, payload in self.payloads:
             mime_data.setData(mime_type, QByteArray(payload))
+        if self.image is not None:
+            mime_data.setImageData(self.image.copy())
         return mime_data
 
 
@@ -58,15 +64,27 @@ class QtClipboard:
         payload.setData(self._OWNER_FORMAT, QByteArray(owner_token))
         self._clipboard.setMimeData(payload, QClipboard.Mode.Clipboard)
 
+        pasted = False
         try:
-            pasted = send_paste()
-            if pasted:
-                self._wait_for_target()
-            return pasted
+            try:
+                pasted = send_paste()
+                if pasted:
+                    self._wait_for_target()
+                return pasted
+            except Exception as error:
+                if pasted:
+                    raise ClipboardTransactionError(paste_succeeded=True) from error
+                raise
         finally:
-            current = self._clipboard.mimeData(QClipboard.Mode.Clipboard)
-            if current is not None and current.data(self._OWNER_FORMAT).data() == owner_token:
-                self._clipboard.setMimeData(snapshot.to_mime_data(), QClipboard.Mode.Clipboard)
+            try:
+                current = self._clipboard.mimeData(QClipboard.Mode.Clipboard)
+                if current is not None and current.data(self._OWNER_FORMAT).data() == owner_token:
+                    self._clipboard.setMimeData(
+                        snapshot.to_mime_data(),
+                        QClipboard.Mode.Clipboard,
+                    )
+            except Exception as error:
+                raise ClipboardTransactionError(paste_succeeded=pasted) from error
 
     def _wait_for_target(self) -> None:
         if self._restore_delay_ms <= 0:
@@ -78,3 +96,14 @@ class QtClipboard:
 
 def _copy_bytes(value: bytes | bytearray | memoryview[int]) -> bytes:
     return value if isinstance(value, bytes) else bytes(value)
+
+
+def _copy_image(mime_data: QMimeData) -> QImage | None:
+    if not mime_data.hasImage():
+        return None
+    image = mime_data.imageData()
+    if isinstance(image, QImage):
+        return image.copy()
+    if isinstance(image, QPixmap):
+        return image.toImage().copy()
+    return None

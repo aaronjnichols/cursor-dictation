@@ -3,6 +3,8 @@ from __future__ import annotations
 import ctypes
 from ctypes import wintypes
 
+from cursor_dictation.output.delivery import PartialUnicodeInputError
+
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
@@ -23,8 +25,34 @@ class KEYBDINPUT(ctypes.Structure):
     ]
 
 
+class MOUSEINPUT(ctypes.Structure):
+    _fields_ = [
+        ("dx", wintypes.LONG),
+        ("dy", wintypes.LONG),
+        ("mouseData", wintypes.DWORD),
+        ("dwFlags", wintypes.DWORD),
+        ("time", wintypes.DWORD),
+        ("dwExtraInfo", ULONG_PTR),
+    ]
+
+
+class HARDWAREINPUT(ctypes.Structure):
+    _fields_ = [
+        ("uMsg", wintypes.DWORD),
+        ("wParamL", wintypes.WORD),
+        ("wParamH", wintypes.WORD),
+    ]
+
+
 class _INPUT_UNION(ctypes.Union):
-    _fields_ = [("ki", KEYBDINPUT)]
+    # The union must include its largest Windows member. Keeping only
+    # KEYBDINPUT makes INPUT eight bytes too small on 64-bit Windows, and
+    # SendInput rejects every event with ERROR_INVALID_PARAMETER.
+    _fields_ = [
+        ("mi", MOUSEINPUT),
+        ("ki", KEYBDINPUT),
+        ("hi", HARDWAREINPUT),
+    ]
 
 
 class INPUT(ctypes.Structure):
@@ -48,22 +76,34 @@ class Win32Keyboard:
 
     def send_unicode(self, text: str) -> bool:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        for character in normalized:
+        for character_index, character in enumerate(normalized):
             if character == "\n":
-                if not self._send(
-                    self._virtual_key(VK_RETURN),
-                    self._virtual_key(VK_RETURN, key_up=True),
-                ):
-                    return False
+                try:
+                    sent = self._send(
+                        self._virtual_key(VK_RETURN),
+                        self._virtual_key(VK_RETURN, key_up=True),
+                    )
+                except Exception as error:
+                    raise PartialUnicodeInputError(
+                        remaining_text=normalized[character_index:]
+                    ) from error
+                if not sent:
+                    raise PartialUnicodeInputError(remaining_text=normalized[character_index:])
                 continue
             encoded = character.encode("utf-16-le")
             for offset in range(0, len(encoded), 2):
                 code_unit = int.from_bytes(encoded[offset : offset + 2], "little")
-                if not self._send(
-                    self._unicode_key(code_unit),
-                    self._unicode_key(code_unit, key_up=True),
-                ):
-                    return False
+                try:
+                    sent = self._send(
+                        self._unicode_key(code_unit),
+                        self._unicode_key(code_unit, key_up=True),
+                    )
+                except Exception as error:
+                    raise PartialUnicodeInputError(
+                        remaining_text=normalized[character_index:]
+                    ) from error
+                if not sent:
+                    raise PartialUnicodeInputError(remaining_text=normalized[character_index:])
         return True
 
     def _send(self, *inputs: INPUT) -> bool:

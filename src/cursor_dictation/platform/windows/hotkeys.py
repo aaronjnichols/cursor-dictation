@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 from collections.abc import Callable
 from ctypes import wintypes
+from typing import Any
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QCoreApplication, QObject, Signal
 
@@ -35,6 +36,13 @@ WM_KEYUP = 0x0101
 WM_SYSKEYDOWN = 0x0104
 WM_SYSKEYUP = 0x0105
 WH_KEYBOARD_LL = 13
+
+LowLevelKeyboardProc = ctypes.WINFUNCTYPE(
+    wintypes.LPARAM,
+    ctypes.c_int,
+    wintypes.WPARAM,
+    wintypes.LPARAM,
+)
 
 
 class HotkeyRegistrationError(RuntimeError):
@@ -71,6 +79,7 @@ class WindowsHotkeyService(QObject):
     copy_pressed = Signal()
     cancel_pressed = Signal()
 
+    _HOLD_ID = 4100
     _TOGGLE_ID = 4101
     _COPY_ID = 4102
     _CANCEL_ID = 4103
@@ -79,6 +88,7 @@ class WindowsHotkeyService(QObject):
         super().__init__()
         self._user32 = ctypes.windll.user32
         self._kernel32 = ctypes.windll.kernel32
+        _configure_win32_signatures(self._user32, self._kernel32)
         self._bindings: HotkeyBindings | None = None
         self._registered_ids: list[int] = []
         self._hold_down = False
@@ -115,6 +125,7 @@ class WindowsHotkeyService(QObject):
 
     def _apply(self, bindings: HotkeyBindings) -> None:
         registered = (
+            (self._HOLD_ID, bindings.hold),
             (self._TOGGLE_ID, bindings.toggle),
             (self._COPY_ID, bindings.copy),
             (self._CANCEL_ID, bindings.cancel),
@@ -133,13 +144,6 @@ class WindowsHotkeyService(QObject):
         self._bindings = bindings
 
     def _install_hold_hook(self, hold: Hotkey) -> None:
-        callback_type = ctypes.WINFUNCTYPE(
-            ctypes.c_longlong,
-            ctypes.c_int,
-            wintypes.WPARAM,
-            wintypes.LPARAM,
-        )
-
         def callback(code: int, message: int, data_pointer: int) -> int:
             if code >= 0:
                 data = ctypes.cast(
@@ -160,7 +164,7 @@ class WindowsHotkeyService(QObject):
                         return 1
             return int(self._user32.CallNextHookEx(self._hook, code, message, data_pointer))
 
-        self._hook_callback = callback_type(callback)
+        self._hook_callback = LowLevelKeyboardProc(callback)
         module = self._kernel32.GetModuleHandleW(None)
         self._hook = self._user32.SetWindowsHookExW(
             WH_KEYBOARD_LL,
@@ -192,3 +196,48 @@ class WindowsHotkeyService(QObject):
             self.copy_pressed.emit()
         elif hotkey_id == self._CANCEL_ID:
             self.cancel_pressed.emit()
+
+
+def _configure_win32_signatures(user32: Any, kernel32: Any) -> None:
+    signatures = (
+        (
+            user32.RegisterHotKey,
+            [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT],
+            wintypes.BOOL,
+        ),
+        (
+            user32.UnregisterHotKey,
+            [wintypes.HWND, ctypes.c_int],
+            wintypes.BOOL,
+        ),
+        (
+            user32.SetWindowsHookExW,
+            [ctypes.c_int, LowLevelKeyboardProc, wintypes.HINSTANCE, wintypes.DWORD],
+            wintypes.HHOOK,
+        ),
+        (
+            user32.UnhookWindowsHookEx,
+            [wintypes.HHOOK],
+            wintypes.BOOL,
+        ),
+        (
+            user32.CallNextHookEx,
+            [wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM],
+            wintypes.LPARAM,
+        ),
+        (
+            user32.GetAsyncKeyState,
+            [ctypes.c_int],
+            wintypes.SHORT,
+        ),
+        (
+            kernel32.GetModuleHandleW,
+            [wintypes.LPCWSTR],
+            wintypes.HMODULE,
+        ),
+    )
+    for function, argument_types, result_type in signatures:
+        # Tests use small Python fakes. Real ctypes functions expose both fields.
+        if hasattr(function, "argtypes"):
+            function.argtypes = argument_types
+            function.restype = result_type

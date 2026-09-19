@@ -11,6 +11,7 @@ from cursor_dictation.platform.windows.hotkeys import (
     Hotkey,
     HotkeyBindings,
     HotkeyParseError,
+    HotkeyRegistrationError,
     WindowsHotkeyService,
     ensure_unique,
     parse_hotkey,
@@ -56,6 +57,62 @@ def test_default_bindings_match_product_decisions() -> None:
     assert bindings.toggle.canonical == "Ctrl+Alt+D"
     assert bindings.copy.canonical == "Ctrl+Alt+C"
     assert bindings.cancel.canonical == "Ctrl+Alt+Escape"
+
+
+def test_win32_hotkey_functions_use_pointer_width_signatures(qapp) -> None:  # type: ignore[no-untyped-def]
+    service = WindowsHotkeyService()
+    try:
+        assert ctypes.windll.kernel32.GetModuleHandleW.restype is ctypes.wintypes.HMODULE
+        assert ctypes.windll.user32.SetWindowsHookExW.restype is ctypes.wintypes.HHOOK
+    finally:
+        service.close()
+
+
+def test_hold_hotkey_conflict_is_detected_before_installing_hook(
+    qapp,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    class FakeUser32:
+        hook_install_count = 0
+
+        def RegisterHotKey(
+            self,
+            _window: object,
+            hotkey_id: int,
+            _modifiers: int,
+            _virtual_key: int,
+        ) -> bool:
+            return hotkey_id != WindowsHotkeyService._HOLD_ID
+
+        def UnregisterHotKey(self, *_args: object) -> bool:
+            return True
+
+        def SetWindowsHookExW(self, *_args: object) -> int:
+            self.hook_install_count += 1
+            return 99
+
+        def UnhookWindowsHookEx(self, _hook: object) -> bool:
+            return True
+
+        def GetAsyncKeyState(self, _key: int) -> int:
+            return 0
+
+        def CallNextHookEx(self, *_args: object) -> int:
+            return 0
+
+    class FakeKernel32:
+        def GetModuleHandleW(self, _name: object) -> int:
+            return 1
+
+    user32 = FakeUser32()
+    monkeypatch.setattr(ctypes.windll, "user32", user32)
+    monkeypatch.setattr(ctypes.windll, "kernel32", FakeKernel32())
+    service = WindowsHotkeyService()
+
+    with pytest.raises(HotkeyRegistrationError, match=r"Ctrl\+Alt\+Space"):
+        service.configure(HotkeyBindings.defaults())
+
+    assert user32.hook_install_count == 0
 
 
 def test_hold_hook_consumes_owned_chord_but_chains_unrelated_keys(
