@@ -44,14 +44,14 @@ def test_source_launch_can_include_module_arguments() -> None:
     assert registry.value == '"C:\\Python311\\pythonw.exe" -m cursor_dictation --startup'
 
 
-def test_disable_removes_only_owned_value() -> None:
-    registry = FakeRegistry(value='"C:\\Other App\\other.exe"')
-    manager = StartupManager(registry, "C:\\Cursor Dictation\\app.exe")
+def test_disable_removes_stale_owned_value_after_executable_moves() -> None:
+    registry = FakeRegistry(value='"D:\\Old Folder\\Cursor Dictation.exe" --startup')
+    manager = StartupManager(registry, "C:\\New Folder\\Cursor Dictation.exe")
 
     manager.set_enabled(False)
 
-    assert registry.value == '"C:\\Other App\\other.exe"'
-    assert registry.delete_count == 0
+    assert registry.value is None
+    assert registry.delete_count == 1
 
 
 def test_quote_windows_argument_escapes_embedded_quotes() -> None:

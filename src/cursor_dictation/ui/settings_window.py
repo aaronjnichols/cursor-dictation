@@ -161,6 +161,9 @@ class SettingsWindow(QMainWindow):
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
+    def set_microphone_test_status(self, message: str, *, error: bool = False) -> None:
+        self.set_status(message, error=error)
+
     def set_editing_enabled(self, enabled: bool) -> None:
         self._editing_enabled = enabled
         self.navigation.setEnabled(enabled)

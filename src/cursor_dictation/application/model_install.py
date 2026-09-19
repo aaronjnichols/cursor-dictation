@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import quote
 from uuid import uuid4
 
 from cursor_dictation.transcription.model_manifest import (
@@ -36,6 +37,9 @@ class SnapshotDownload(Protocol):
         revision: str,
         local_dir: str,
         allow_patterns: tuple[str, ...],
+        expected_size_bytes: int,
+        progress: ProgressCallback,
+        cancel_requested: CancelCheck,
     ) -> str: ...
 
 
@@ -45,13 +49,12 @@ class DefaultModelInstaller:
         *,
         manifest: ModelManifest,
         models_root: Path,
-        downloads_root: Path,
         smoke_load: Callable[[Path], object],
         snapshot_download: SnapshotDownload | None = None,
     ) -> None:
         self.manifest = manifest
         self.models_root = models_root
-        self.downloads_root = downloads_root
+        self.downloads_root = models_root / ".downloads"
         self._smoke_load = smoke_load
         self._snapshot_download = snapshot_download or _snapshot_download
 
@@ -98,8 +101,15 @@ class DefaultModelInstaller:
                     revision=self.manifest.revision,
                     local_dir=str(partial),
                     allow_patterns=tuple(self.manifest.required_files),
+                    expected_size_bytes=self.manifest.approximate_size_bytes,
+                    progress=notify,
+                    cancel_requested=cancelled,
                 )
+            except InstallCancelled:
+                raise
             except Exception as error:
+                if cancelled():
+                    raise InstallCancelled("Model installation was cancelled.") from error
                 raise ModelInstallError(f"Model download failed: {error}") from error
             if cancelled():
                 raise InstallCancelled("Model installation was cancelled.")
@@ -174,17 +184,47 @@ def _snapshot_download(
     revision: str,
     local_dir: str,
     allow_patterns: tuple[str, ...],
+    expected_size_bytes: int,
+    progress: ProgressCallback,
+    cancel_requested: CancelCheck,
 ) -> str:
-    from huggingface_hub import snapshot_download
+    import requests
 
-    return str(
-        snapshot_download(
-            repo_id=repo_id,
-            revision=revision,
-            local_dir=local_dir,
-            allow_patterns=list(allow_patterns),
-        )
-    )
+    root = Path(local_dir)
+    downloaded_bytes = 0
+    session = requests.Session()
+    session.headers["User-Agent"] = "cursor-dictation/0.1"
+    try:
+        for relative_name in allow_patterns:
+            if cancel_requested():
+                raise InstallCancelled("Model installation was cancelled.")
+            destination = root.joinpath(*relative_name.split("/"))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            url = (
+                f"https://huggingface.co/{quote(repo_id, safe='/')}/resolve/"
+                f"{quote(revision, safe='')}/{quote(relative_name, safe='/')}"
+            )
+            with session.get(
+                url,
+                stream=True,
+                allow_redirects=True,
+                timeout=(10, 5),
+            ) as response:
+                response.raise_for_status()
+                with destination.open("wb") as output:
+                    for block in response.iter_content(chunk_size=1024 * 1024):
+                        if cancel_requested():
+                            raise InstallCancelled("Model installation was cancelled.")
+                        if not block:
+                            continue
+                        output.write(block)
+                        downloaded_bytes += len(block)
+                        fraction = downloaded_bytes / max(1, expected_size_bytes)
+                        percent = 5 + round(min(1.0, fraction) * 75)
+                        progress(percent, f"Downloading {relative_name}...")
+    finally:
+        session.close()
+    return str(root)
 
 
 def _manifest_payload(manifest: ModelManifest) -> dict[str, object]:

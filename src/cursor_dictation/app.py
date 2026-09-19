@@ -76,7 +76,6 @@ def build_coordinator(application: QApplication, paths: AppPaths) -> Application
         return DefaultModelInstaller(
             manifest=manifest,
             models_root=models_root,
-            downloads_root=paths.downloads_dir,
             smoke_load=smoke_load,
         )
 

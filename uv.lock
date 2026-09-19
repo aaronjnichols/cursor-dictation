@@ -166,6 +166,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pyside6" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "requests" },
     { name = "sounddevice" },
 ]
 
@@ -186,6 +187,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0,<3" },
     { name = "pyside6", specifier = ">=6.8,<7" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=308" },
+    { name = "requests", specifier = ">=2.32,<3" },
     { name = "sounddevice", specifier = ">=0.5,<1" },
 ]
 

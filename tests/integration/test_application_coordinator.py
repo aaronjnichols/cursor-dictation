@@ -4,6 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from threading import Event
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
@@ -69,9 +70,15 @@ class ImmediateTaskRunner(QObject):
 
 
 class FakeEngine:
-    def __init__(self, *, load_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        load_error: Exception | None = None,
+        transcribe_gate: Event | None = None,
+    ) -> None:
         self.path: Path | None = None
         self.load_error = load_error
+        self.transcribe_gate = transcribe_gate
 
     def load(self, model_path: Path) -> ModelInfo:
         if self.load_error is not None:
@@ -85,6 +92,8 @@ class FakeEngine:
         language: str,
         vocabulary: Sequence[str],
     ) -> Transcript:
+        if self.transcribe_gate is not None:
+            self.transcribe_gate.wait(timeout=5)
         return Transcript("fixture transcript")
 
 
@@ -168,8 +177,13 @@ class FakeHotkeys(QObject):
         self.configurations: list[HotkeyBindings] = []
         self.closed = False
         self.error: Exception | None = None
+        self.configure_errors: list[Exception | None] = []
 
     def configure(self, bindings: HotkeyBindings) -> None:
+        if self.configure_errors:
+            error = self.configure_errors.pop(0)
+            if error is not None:
+                raise error
         if self.error is not None:
             raise self.error
         self.configurations.append(bindings)
@@ -203,6 +217,7 @@ def make_coordinator(
     installed: bool,
     startup_error: Exception | None = None,
     model_load_error: Exception | None = None,
+    transcribe_gate: Event | None = None,
     task_runner: ImmediateTaskRunner | None = None,
 ) -> tuple[
     ApplicationCoordinator,
@@ -219,7 +234,12 @@ def make_coordinator(
     vocabulary_store = VocabularyStore(paths.vocabulary_file)
     history = JsonlHistoryStore(paths.history_file)
     hotkeys = FakeHotkeys()
-    manager = ModelManager(engine_factory=lambda: FakeEngine(load_error=model_load_error))
+    manager = ModelManager(
+        engine_factory=lambda: FakeEngine(
+            load_error=model_load_error,
+            transcribe_gate=transcribe_gate,
+        )
+    )
     default_installer = FakeInstaller(paths.models_dir, installed=installed)
     if installed:
         default_installer.target_directory.mkdir(parents=True)
@@ -258,6 +278,27 @@ def test_first_run_waits_for_model_before_enabling_dictation(qtbot, tmp_path: Pa
     assert coordinator.setup_window.isVisible()
     assert not coordinator.tray.start_action.isEnabled()
     assert hotkeys.configurations == []
+    coordinator.close()
+
+
+def test_first_run_setup_can_test_selected_microphone(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=False)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    recorder = coordinator._recorder  # type: ignore[attr-defined]
+    assert isinstance(recorder, FakeRecorder)
+    coordinator.start()
+    coordinator.setup_window.microphone.setCurrentIndex(1)
+
+    coordinator.setup_window.test_microphone_button.click()
+    coordinator._poll_microphone_test()  # type: ignore[attr-defined]
+
+    assert recorder.started_device == "wasapi:built-in"
+    assert coordinator.setup_window.input_level.value() == 42
+    coordinator._complete_microphone_test()  # type: ignore[attr-defined]
+    assert coordinator.setup_window.progress_text == "Microphone test complete"
+    assert recorder.cancel_count == 1
     coordinator.close()
 
 
@@ -393,6 +434,30 @@ def test_first_run_hotkey_conflict_does_not_persist_custom_model_settings(
     assert coordinator.runtime is None
     assert settings_store.load() == AppSettings()
     assert "shortcut" in coordinator.settings_window.status_text
+    coordinator.close()
+
+
+def test_startup_hotkey_failure_can_be_repaired_without_enabling_behind_settings(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, hotkeys, settings_store, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    hotkeys.error = RuntimeError("shortcut already in use")
+    coordinator.start()
+    assert coordinator.runtime is None
+    assert coordinator.settings_window.isVisible()
+    hotkeys.error = None
+    coordinator.settings_window.hold_hotkey.setText("Ctrl+Shift+Space")
+
+    coordinator.save_settings()
+
+    assert coordinator.runtime is not None
+    assert coordinator.state is AppState.IDLE
+    assert not coordinator.settings_window.isVisible()
+    assert settings_store.load().hold_to_talk_hotkey == "Ctrl+Shift+Space"
     coordinator.close()
 
 
@@ -632,8 +697,55 @@ def test_cancelling_recommended_model_switch_restores_previous_runtime(
     assert coordinator.state is AppState.IDLE
     assert settings_store.load().model_source is ModelSource.CUSTOM
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
     assert coordinator.state is AppState.RECORDING
     hotkeys.cancel_pressed.emit()
+    coordinator.close()
+
+
+def test_model_switch_rollback_failure_stays_fail_closed_after_setup_cancel(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    custom_model = tmp_path / "working-custom"
+    custom_model.mkdir()
+    (custom_model / "model.bin").write_bytes(b"model")
+    (custom_model / "config.json").write_text('{"language":"en"}', encoding="utf-8")
+    (custom_model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    coordinator, hotkeys, settings_store, _, _ = make_coordinator(
+        tmp_path,
+        installed=False,
+    )
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    settings_store.save(
+        replace(
+            AppSettings(),
+            model_path=str(custom_model),
+            model_source=ModelSource.CUSTOM,
+        )
+    )
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.use_default_model_button.click()
+    coordinator.save_settings()
+    hotkeys.configure_errors = [None, RuntimeError("old shortcut could not be restored")]
+    monkeypatch.setattr(
+        settings_store,
+        "save",
+        lambda _settings: (_ for _ in ()).throw(OSError("settings write failed")),
+    )
+
+    coordinator.setup_window.install_button.click()
+    coordinator.setup_window.cancel_requested.emit()
+    hotkeys.toggle_pressed.emit()
+
+    assert coordinator.state is AppState.ERROR
+    assert coordinator.settings_window.isVisible()
+    assert coordinator.runtime is not None
+    assert coordinator.runtime._enabled is False  # type: ignore[attr-defined]
     coordinator.close()
 
 
@@ -657,12 +769,18 @@ def test_startup_registry_failure_does_not_block_dictation_runtime(qtbot, tmp_pa
 
 
 def test_settings_cannot_open_during_recording_or_transcription(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
-    coordinator, hotkeys, _, _, _ = make_coordinator(tmp_path, installed=True)
+    transcribe_gate = Event()
+    coordinator, hotkeys, _, _, _ = make_coordinator(
+        tmp_path,
+        installed=True,
+        transcribe_gate=transcribe_gate,
+    )
     qtbot.addWidget(coordinator.setup_window)
     qtbot.addWidget(coordinator.settings_window)
     qtbot.addWidget(coordinator.overlay)
     coordinator.start()
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
     assert coordinator.state is AppState.RECORDING
 
     coordinator.show_settings()
@@ -670,12 +788,14 @@ def test_settings_cannot_open_during_recording_or_transcription(qtbot, tmp_path:
     assert coordinator.state is AppState.RECORDING
     assert not coordinator.settings_window.isVisible()
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.TRANSCRIBING)
     assert coordinator.state is AppState.TRANSCRIBING
 
     coordinator.show_settings()
 
     assert coordinator.state is AppState.TRANSCRIBING
     assert not coordinator.settings_window.isVisible()
+    transcribe_gate.set()
     coordinator.close()
 
 
@@ -784,6 +904,36 @@ def test_settings_save_updates_persistence_vocabulary_and_runtime(qtbot, tmp_pat
     coordinator.close()
 
 
+def test_hotkey_rollback_failure_stays_fail_closed_after_settings_close(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, hotkeys, settings_store, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.hold_hotkey.setText("Ctrl+Shift+Space")
+    hotkeys.configure_errors = [None, RuntimeError("old shortcut could not be restored")]
+    monkeypatch.setattr(
+        settings_store,
+        "save",
+        lambda _settings: (_ for _ in ()).throw(OSError("settings write failed")),
+    )
+
+    coordinator.save_settings()
+    coordinator.settings_window.close()
+    hotkeys.toggle_pressed.emit()
+
+    assert coordinator.state is AppState.ERROR
+    assert "rollback failed" in coordinator.settings_window.status_text
+    assert coordinator.runtime is not None
+    assert coordinator.runtime._enabled is False  # type: ignore[attr-defined]
+    coordinator.close()
+
+
 def test_settings_history_can_be_copied_and_cleared(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     coordinator, _, _, _, history = make_coordinator(tmp_path, installed=True)
     qtbot.addWidget(coordinator.setup_window)
@@ -826,4 +976,26 @@ def test_settings_microphone_test_previews_level_and_stops_on_close(
     coordinator.settings_window.close()
     assert recorder.cancel_count == 1
     assert coordinator.settings_window.input_level.value() == 0
+    coordinator.close()
+
+
+def test_settings_microphone_test_timeout_reports_completion(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    recorder = coordinator._recorder  # type: ignore[attr-defined]
+    assert isinstance(recorder, FakeRecorder)
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.test_microphone_button.click()
+
+    coordinator._complete_microphone_test()  # type: ignore[attr-defined]
+
+    assert recorder.cancel_count == 1
+    assert coordinator.settings_window.status_text == "Microphone test complete"
+    assert coordinator.settings_window.test_microphone_button.text() == "Test microphone"
     coordinator.close()

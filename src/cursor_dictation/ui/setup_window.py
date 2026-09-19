@@ -25,6 +25,7 @@ class SetupWindow(QDialog):
     install_requested = Signal()
     cancel_requested = Signal()
     dismiss_requested = Signal()
+    microphone_test_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -69,6 +70,14 @@ class SetupWindow(QDialog):
         self.microphone = QComboBox()
         self.microphone.addItem("Windows default", None)
         layout.addWidget(self.microphone)
+        self.input_level = QProgressBar()
+        self.input_level.setRange(0, 100)
+        self.input_level.setValue(0)
+        self.input_level.setFormat("Input level")
+        layout.addWidget(self.input_level)
+        self.test_microphone_button = QPushButton("Test microphone")
+        self.test_microphone_button.clicked.connect(self.microphone_test_requested.emit)
+        layout.addWidget(self.test_microphone_button)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
@@ -138,6 +147,21 @@ class SetupWindow(QDialog):
     def set_error(self, message: str) -> None:
         self.progress_label.setText(message)
         self.install_button.setEnabled(True)
+
+    def set_microphone_test_active(self, active: bool) -> None:
+        self.test_microphone_button.setText("Stop test" if active else "Test microphone")
+        self.microphone.setEnabled(not active)
+        if not active:
+            self.input_level.setValue(0)
+
+    def set_input_level(self, level: float) -> None:
+        self.input_level.setValue(round(max(0.0, min(1.0, level)) * 100))
+
+    def set_microphone_test_status(self, message: str, *, error: bool = False) -> None:
+        self.progress_label.setText(message)
+        self.progress_label.setProperty("error", error)
+        self.progress_label.style().unpolish(self.progress_label)
+        self.progress_label.style().polish(self.progress_label)
 
     def set_complete(self) -> None:
         self.progress_bar.setValue(100)

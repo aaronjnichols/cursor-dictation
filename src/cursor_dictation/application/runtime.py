@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, Qt, QTimer
 
 from cursor_dictation.application.controller import DictationController
 from cursor_dictation.audio.recorder import RecordingCompletionReason
@@ -12,7 +12,11 @@ from cursor_dictation.ui.tray import TrayIcon
 
 
 class _Signal(Protocol):
-    def connect(self, slot: object) -> object: ...
+    def connect(
+        self,
+        slot: object,
+        connection_type: Qt.ConnectionType = Qt.ConnectionType.AutoConnection,
+    ) -> object: ...
 
 
 class HotkeyPort(Protocol):
@@ -48,11 +52,12 @@ class DictationRuntime(QObject):
         self._hold_active = False
         self._enabled = True
 
-        hotkeys.hold_pressed.connect(self._hold_pressed)
-        hotkeys.hold_released.connect(self._hold_released)
-        hotkeys.toggle_pressed.connect(self._toggle_insert)
-        hotkeys.copy_pressed.connect(self._toggle_copy)
-        hotkeys.cancel_pressed.connect(self._cancel)
+        queued = Qt.ConnectionType.QueuedConnection
+        hotkeys.hold_pressed.connect(self._hold_pressed, queued)
+        hotkeys.hold_released.connect(self._hold_released, queued)
+        hotkeys.toggle_pressed.connect(self._toggle_insert, queued)
+        hotkeys.copy_pressed.connect(self._toggle_copy, queued)
+        hotkeys.cancel_pressed.connect(self._cancel, queued)
         tray.start_insert_requested.connect(self._toggle_insert)
         tray.start_copy_requested.connect(self._toggle_copy)
         tray.cancel_requested.connect(self._cancel)

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 from uuid import uuid4
 
 from PySide6.QtCore import QTimer
@@ -36,6 +36,17 @@ from cursor_dictation.ui.status_overlay import StatusOverlay
 from cursor_dictation.ui.tray import TrayIcon
 
 InstallerFactory = Callable[[Path], DefaultModelInstaller]
+
+
+class _MicrophoneTestSurface(Protocol):
+    @property
+    def selected_microphone_id(self) -> str | None: ...
+
+    def set_microphone_test_active(self, active: bool) -> None: ...
+
+    def set_input_level(self, level: float) -> None: ...
+
+    def set_microphone_test_status(self, message: str, *, error: bool = False) -> None: ...
 
 
 class _TaskKind(StrEnum):
@@ -100,16 +111,18 @@ class ApplicationCoordinator:
         self._controller: DictationController | None = None
         self.runtime: DictationRuntime | None = None
         self._hotkeys_configured = False
+        self._fatal_transaction_error = False
         self._started = False
         self._closing = False
         self._microphone_test_active = False
+        self._microphone_test_surface: _MicrophoneTestSurface | None = None
         self._microphone_test_timer = QTimer()
         self._microphone_test_timer.setInterval(100)
         self._microphone_test_timer.timeout.connect(self._poll_microphone_test)
         self._microphone_test_timeout = QTimer()
         self._microphone_test_timeout.setSingleShot(True)
         self._microphone_test_timeout.setInterval(10_000)
-        self._microphone_test_timeout.timeout.connect(self._stop_microphone_test)
+        self._microphone_test_timeout.timeout.connect(self._complete_microphone_test)
 
         self.tray.settings_requested.connect(self.show_settings)
         self.tray.quit_requested.connect(self._application.quit)
@@ -120,7 +133,12 @@ class ApplicationCoordinator:
         self.settings_window.close_requested.connect(self._settings_closed)
         self.settings_window.clear_history_requested.connect(self.clear_history)
         self.settings_window.copy_history_requested.connect(self.copy_history_text)
-        self.settings_window.microphone_test_requested.connect(self._toggle_microphone_test)
+        self.settings_window.microphone_test_requested.connect(
+            lambda: self._toggle_microphone_test(self.settings_window)
+        )
+        self.setup_window.microphone_test_requested.connect(
+            lambda: self._toggle_microphone_test(self.setup_window)
+        )
         self._task_runner.progress.connect(self._task_progress)
         self._task_runner.succeeded.connect(self._task_succeeded)
         self._task_runner.failed.connect(self._task_failed)
@@ -204,6 +222,13 @@ class ApplicationCoordinator:
 
     def save_settings(self) -> None:
         self._stop_microphone_test()
+        if self._fatal_transaction_error:
+            self.settings_window.set_status(
+                "Settings could not be restored safely. Restart Cursor Dictation before "
+                "making more changes.",
+                error=True,
+            )
+            return
         if self._task_runner.is_running:
             self.settings_window.set_status(
                 "Wait for the current model task to finish.", error=True
@@ -284,6 +309,7 @@ class ApplicationCoordinator:
         )
 
     def install_default_model(self) -> None:
+        self._stop_microphone_test()
         if self._task_runner.is_running:
             return
         models_root = self.setup_window.install_root.resolve()
@@ -600,6 +626,7 @@ class ApplicationCoordinator:
             message = str(error)
             if rollback_errors:
                 message += "; rollback failed: " + "; ".join(map(str, rollback_errors))
+                self._fatal_transaction_error = True
                 if self.runtime is not None:
                     self.runtime.set_enabled(False)
                 self._set_state(AppState.ERROR)
@@ -624,6 +651,8 @@ class ApplicationCoordinator:
             and self.runtime is None
             and self._model_manager.active_engine is not None
         ):
+            if self.settings_window.isVisible():
+                self.settings_window.close()
             self._arm_runtime(hotkeys_ready=True, sync_startup=False)
         return True
 
@@ -639,25 +668,32 @@ class ApplicationCoordinator:
         if self._closing:
             return
         self._stop_microphone_test()
+        if self._fatal_transaction_error:
+            if self.runtime is not None:
+                self.runtime.set_enabled(False)
+            self._set_state(AppState.ERROR)
+            self.overlay.show_error("Restart required after settings rollback failure")
+            return
         if self.runtime is not None:
             self.runtime.set_enabled(True)
         next_state = self._controller.state if self._controller is not None else self._state
         self._set_state(next_state)
 
-    def _toggle_microphone_test(self) -> None:
+    def _toggle_microphone_test(self, surface: _MicrophoneTestSurface) -> None:
         if self._microphone_test_active:
             self._stop_microphone_test()
-            self.settings_window.set_status("Microphone test stopped")
+            surface.set_microphone_test_status("Microphone test stopped")
             return
         try:
-            self._recorder.start(self.settings_window.selected_microphone_id)
+            self._recorder.start(surface.selected_microphone_id)
         except Exception as error:
-            self.settings_window.set_status(f"Could not test microphone: {error}", error=True)
+            surface.set_microphone_test_status(f"Could not test microphone: {error}", error=True)
             self._log_error("microphone_test_failed", error)
             return
         self._microphone_test_active = True
-        self.settings_window.set_microphone_test_active(True)
-        self.settings_window.set_status("Listening for 10 seconds...")
+        self._microphone_test_surface = surface
+        surface.set_microphone_test_active(True)
+        surface.set_microphone_test_status("Listening for 10 seconds...")
         self._microphone_test_timer.start()
         self._microphone_test_timeout.start()
 
@@ -666,10 +702,15 @@ class ApplicationCoordinator:
             return
         reason = self._recorder.wait_for_completion(timeout=0)
         if reason is not None:
+            surface = self._microphone_test_surface
             self._stop_microphone_test()
-            self.settings_window.set_status("The microphone test stopped unexpectedly.", error=True)
+            if surface is not None:
+                surface.set_microphone_test_status(
+                    "The microphone test stopped unexpectedly.", error=True
+                )
             return
-        self.settings_window.set_input_level(self._recorder.input_level)
+        if self._microphone_test_surface is not None:
+            self._microphone_test_surface.set_input_level(self._recorder.input_level)
 
     def _stop_microphone_test(self) -> None:
         if not self._microphone_test_active:
@@ -681,10 +722,22 @@ class ApplicationCoordinator:
         except Exception as error:
             self._log_error("microphone_test_stop_failed", error)
         finally:
+            surface = self._microphone_test_surface
             self._microphone_test_active = False
-            self.settings_window.set_microphone_test_active(False)
+            self._microphone_test_surface = None
+            if surface is not None:
+                surface.set_microphone_test_active(False)
+
+    def _complete_microphone_test(self) -> None:
+        if not self._microphone_test_active:
+            return
+        surface = self._microphone_test_surface
+        self._stop_microphone_test()
+        if surface is not None:
+            surface.set_microphone_test_status("Microphone test complete")
 
     def _cancel_setup(self) -> None:
+        self._stop_microphone_test()
         if self._task_runner.is_running:
             self._task_runner.cancel()
             if self._setup_model_switch:
@@ -701,6 +754,13 @@ class ApplicationCoordinator:
         self._setup_model_switch = False
         self._cancel_model_switch_requested = False
         self.setup_window.close_for_application()
+        if self._fatal_transaction_error:
+            if self.runtime is not None:
+                self.runtime.set_enabled(False)
+            self._set_state(AppState.ERROR)
+            self.settings_window.show()
+            self.overlay.show_error("Restart required after settings rollback failure")
+            return
         if self.runtime is not None:
             self.runtime.set_enabled(True)
             next_state = self._controller.state if self._controller is not None else AppState.IDLE

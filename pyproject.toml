@@ -16,6 +16,7 @@ dependencies = [
   "numpy>=2.0,<3",
   "PySide6>=6.8,<7",
   "pywin32>=308; sys_platform == 'win32'",
+  "requests>=2.32,<3",
   "sounddevice>=0.5,<1",
 ]
 
@@ -73,4 +74,3 @@ source = ["cursor_dictation"]
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-

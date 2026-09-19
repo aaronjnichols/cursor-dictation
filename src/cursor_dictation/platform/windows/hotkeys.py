@@ -148,12 +148,16 @@ class WindowsHotkeyService(QObject):
                 ).contents
                 if data.vkCode == hold.virtual_key:
                     if message in {WM_KEYDOWN, WM_SYSKEYDOWN}:
-                        if not self._hold_down and self._modifiers_are_down(hold.modifiers):
+                        if self._hold_down:
+                            return 1
+                        if self._modifiers_are_down(hold.modifiers):
                             self._hold_down = True
                             self.hold_pressed.emit()
+                            return 1
                     elif message in {WM_KEYUP, WM_SYSKEYUP} and self._hold_down:
                         self._hold_down = False
                         self.hold_released.emit()
+                        return 1
             return int(self._user32.CallNextHookEx(self._hook, code, message, data_pointer))
 
         self._hook_callback = callback_type(callback)

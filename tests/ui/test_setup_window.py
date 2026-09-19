@@ -28,6 +28,21 @@ def test_setup_progress_disables_install_button(qtbot) -> None:  # type: ignore[
     assert not window.install_button.isEnabled()
 
 
+def test_setup_can_request_microphone_test_and_display_level(qtbot) -> None:  # type: ignore[no-untyped-def]
+    window = SetupWindow()
+    qtbot.addWidget(window)
+
+    with qtbot.waitSignal(window.microphone_test_requested):
+        window.test_microphone_button.click()
+
+    window.set_microphone_test_active(True)
+    window.set_input_level(0.37)
+    assert window.test_microphone_button.text() == "Stop test"
+    assert window.input_level.value() == 37
+    window.set_microphone_test_active(False)
+    assert window.input_level.value() == 0
+
+
 def test_setup_binds_install_location_and_microphone_choice(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     window = SetupWindow()
     qtbot.addWidget(window)

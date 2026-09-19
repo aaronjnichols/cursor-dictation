@@ -113,8 +113,10 @@ def test_hold_to_talk_starts_on_press_and_stops_on_release(qtbot) -> None:  # ty
     runtime, controller, recorder, queue, hotkeys, _, _ = make_runtime(qtbot)
 
     hotkeys.hold_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     assert controller.state is AppState.RECORDING
     hotkeys.hold_released.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
 
     assert controller.state is AppState.TRANSCRIBING
     assert recorder.starts == 1
@@ -123,12 +125,26 @@ def test_hold_to_talk_starts_on_press_and_stops_on_release(qtbot) -> None:  # ty
     runtime.close()
 
 
+def test_global_hotkey_signal_returns_before_microphone_work_starts(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, recorder, _, hotkeys, _, _ = make_runtime(qtbot)
+
+    hotkeys.toggle_pressed.emit()
+
+    assert recorder.starts == 0
+    assert controller.state is AppState.IDLE
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    assert recorder.starts == 1
+    runtime.close()
+
+
 def test_toggle_and_copy_shortcuts_use_separate_delivery_modes(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, _, queue, hotkeys, _, _ = make_runtime(qtbot)
 
     hotkeys.copy_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     assert controller.state is AppState.RECORDING
     hotkeys.copy_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
 
     assert queue.requests[0].delivery_mode is DeliveryMode.COPY
     runtime.close()
@@ -137,6 +153,7 @@ def test_toggle_and_copy_shortcuts_use_separate_delivery_modes(qtbot) -> None:  
 def test_audio_limit_completion_stops_and_transcribes(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, queue, hotkeys, _, _ = make_runtime(qtbot)
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     recorder.completion = RecordingCompletionReason.LIMIT_REACHED
 
     runtime.poll_audio_completion()
@@ -149,10 +166,13 @@ def test_audio_limit_completion_stops_and_transcribes(qtbot) -> None:  # type: i
 def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
     assert controller.state is AppState.TRANSCRIBING
 
     hotkeys.copy_pressed.emit()
+    qtbot.waitUntil(lambda: overlay.status_text == "Transcribing...")
 
     assert recorder.starts == 1
     assert overlay.status_text == "Transcribing..."
@@ -164,6 +184,7 @@ def test_disabled_runtime_rejects_hotkeys_while_settings_are_open(qtbot) -> None
     runtime.set_enabled(False)
 
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: overlay.status_text == "Close Settings to start dictation")
 
     assert controller.state is AppState.IDLE
     assert recorder.starts == 0
@@ -177,7 +198,9 @@ def test_tray_copy_recovers_transcript_after_delivery_failure(qtbot) -> None:  #
     assert isinstance(delivery, FakeDelivery)
     delivery.fail_insert = True
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
     request = queue.requests[-1]
     controller._transcription_succeeded(  # type: ignore[attr-defined]
         request.session_id,
@@ -199,7 +222,9 @@ def test_cancel_discards_a_recoverable_transcript(qtbot) -> None:  # type: ignor
     assert isinstance(delivery, FakeDelivery)
     delivery.fail_insert = True
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
     request = queue.requests[-1]
     controller._transcription_succeeded(  # type: ignore[attr-defined]
         request.session_id,

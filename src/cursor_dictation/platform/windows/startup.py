@@ -65,7 +65,7 @@ class StartupManager:
         if enabled:
             self._registry.write(self._VALUE_NAME, self._command)
             return
-        if self._registry.read(self._VALUE_NAME) == self._command:
+        if self._registry.read(self._VALUE_NAME) is not None:
             self._registry.delete(self._VALUE_NAME)
 
 
