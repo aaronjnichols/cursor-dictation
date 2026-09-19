@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from cursor_dictation.audio.recorder import AudioDevice
 from cursor_dictation.ui.setup_window import SetupWindow
 
 
@@ -23,3 +26,30 @@ def test_setup_progress_disables_install_button(qtbot) -> None:  # type: ignore[
     assert window.progress_bar.value() == 42
     assert window.progress_text == "Verifying files..."
     assert not window.install_button.isEnabled()
+
+
+def test_setup_binds_install_location_and_microphone_choice(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+    window = SetupWindow()
+    qtbot.addWidget(window)
+    devices = (
+        AudioDevice(
+            id="wasapi:built-in",
+            name="Built-in microphone",
+            max_input_channels=2,
+            default_sample_rate=48_000,
+            is_default=True,
+        ),
+        AudioDevice(
+            id="wasapi:usb",
+            name="USB microphone",
+            max_input_channels=1,
+            default_sample_rate=48_000,
+        ),
+    )
+
+    window.set_install_location(tmp_path)
+    window.apply_devices(devices, selected_device_id="wasapi:usb")
+
+    assert window.install_root == tmp_path
+    assert window.selected_microphone_id == "wasapi:usb"
+    assert window.microphone.currentText() == "USB microphone"

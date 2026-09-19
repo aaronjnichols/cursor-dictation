@@ -53,6 +53,9 @@ def build_stylesheet() -> str:
     QLabel#muted, QLabel#helperText {{
         color: {COLORS.muted};
     }}
+    QLabel#settingsStatus[error="true"] {{
+        color: {COLORS.danger};
+    }}
     QLabel#statusDot {{
         color: {COLORS.primary};
         font-size: 18px;

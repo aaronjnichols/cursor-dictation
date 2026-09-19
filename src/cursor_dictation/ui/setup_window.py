@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import cast
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
@@ -13,6 +16,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from cursor_dictation.audio.recorder import AudioDevice
 from cursor_dictation.ui.icons import make_app_icon
 
 
@@ -96,6 +100,34 @@ class SetupWindow(QDialog):
     def progress_text(self) -> str:
         return self.progress_label.text()
 
+    @property
+    def install_root(self) -> Path:
+        return Path(self.install_location.text())
+
+    @property
+    def selected_microphone_id(self) -> str | None:
+        value = self.microphone.currentData()
+        return cast(str, value) if value is not None else None
+
+    def set_install_location(self, path: Path) -> None:
+        self.install_location.setText(str(path))
+
+    def apply_devices(
+        self,
+        devices: tuple[AudioDevice, ...],
+        *,
+        selected_device_id: str | None,
+    ) -> None:
+        self.microphone.clear()
+        self.microphone.addItem("Windows default", None)
+        selected_index = 0
+        for device in devices:
+            label = f"{device.name} (default)" if device.is_default else device.name
+            self.microphone.addItem(label, device.id)
+            if device.id == selected_device_id:
+                selected_index = self.microphone.count() - 1
+        self.microphone.setCurrentIndex(selected_index)
+
     def set_progress(self, percent: int, message: str) -> None:
         self.progress_bar.setValue(max(0, min(100, percent)))
         self.progress_label.setText(message)
@@ -112,6 +144,10 @@ class SetupWindow(QDialog):
         self.install_button.setEnabled(True)
 
     def _choose_location(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Choose model folder")
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Choose model folder",
+            self.install_location.text(),
+        )
         if directory:
             self.install_location.setText(directory)

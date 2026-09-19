@@ -8,6 +8,7 @@ from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -32,6 +33,7 @@ from cursor_dictation.ui.icons import make_app_icon
 class SettingsWindow(QMainWindow):
     save_requested = Signal()
     close_requested = Signal()
+    clear_history_requested = Signal()
 
     page_names = (
         "General",
@@ -72,6 +74,9 @@ class SettingsWindow(QMainWindow):
         root_layout.addLayout(body, 1)
 
         footer = QHBoxLayout()
+        self.status_label = QLabel("")
+        self.status_label.setObjectName("settingsStatus")
+        footer.addWidget(self.status_label)
         footer.addStretch(1)
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
@@ -134,6 +139,28 @@ class SettingsWindow(QMainWindow):
         vocabulary = parse_vocabulary(self.vocabulary_editor.toPlainText())
         return settings, vocabulary
 
+    @property
+    def status_text(self) -> str:
+        return self.status_label.text()
+
+    def set_status(self, message: str, *, error: bool = False) -> None:
+        self.status_label.setText(message)
+        self.status_label.setProperty("error", error)
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
+
+    def _choose_model(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self,
+            "Choose local CTranslate2 model",
+            self.model_path.text(),
+        )
+        if directory:
+            self.model_path.setText(directory)
+
+    def _use_default_model(self) -> None:
+        self.model_path.clear()
+
     def _add_pages(self) -> None:
         self.launch_at_sign_in = QCheckBox("Launch Cursor Dictation when I sign in")
         self.sound_cues = QCheckBox("Play recording and completion sounds")
@@ -177,6 +204,9 @@ class SettingsWindow(QMainWindow):
         self.model_path = QLineEdit()
         self.model_path.setReadOnly(True)
         self.choose_model_button = QPushButton("Choose local model folder")
+        self.choose_model_button.clicked.connect(self._choose_model)
+        self.use_default_model_button = QPushButton("Use recommended model")
+        self.use_default_model_button.clicked.connect(self._use_default_model)
         model_form = QFormLayout()
         model_form.addRow("Active model", QLabel("Whisper small.en"))
         model_form.addRow("Local path", self.model_path)
@@ -184,7 +214,7 @@ class SettingsWindow(QMainWindow):
             self._page(
                 "Model",
                 "Models run locally through CTranslate2 using CPU int8 inference.",
-                (model_form, self.choose_model_button),
+                (model_form, self.choose_model_button, self.use_default_model_button),
             )
         )
 
@@ -201,6 +231,7 @@ class SettingsWindow(QMainWindow):
 
         self.history_enabled = QCheckBox("Keep local transcript history")
         self.clear_history_button = QPushButton("Clear history")
+        self.clear_history_button.clicked.connect(self.clear_history_requested.emit)
         self.stack.addWidget(
             self._page(
                 "History",
