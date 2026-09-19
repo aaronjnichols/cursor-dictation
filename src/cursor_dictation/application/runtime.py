@@ -28,6 +28,9 @@ class HotkeyPort(Protocol):
 
 
 class CompletionRecorder(Protocol):
+    @property
+    def input_level(self) -> float: ...
+
     def wait_for_completion(
         self,
         timeout: float | None = None,
@@ -81,6 +84,7 @@ class DictationRuntime(QObject):
     def poll_audio_completion(self) -> None:
         if self._controller.state is not AppState.RECORDING:
             return
+        self._overlay.set_input_level(self._recorder.input_level)
         reason = self._recorder.wait_for_completion(timeout=0)
         if reason in {
             RecordingCompletionReason.LIMIT_REACHED,

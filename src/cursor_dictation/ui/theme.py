@@ -56,9 +56,10 @@ def build_stylesheet() -> str:
     QLabel#settingsStatus[error="true"] {{
         color: {COLORS.danger};
     }}
-    QLabel#statusDot {{
+    QLabel#statusWaveform {{
         color: {COLORS.primary};
-        font-size: 18px;
+        font-size: 15px;
+        font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
     }}
     QPushButton {{
         min-height: 30px;

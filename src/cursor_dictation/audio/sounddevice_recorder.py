@@ -74,7 +74,9 @@ class SoundDeviceRecorder:
 
         self._sd = sd_module
         self._sample_rate = sample_rate
+        self._max_duration_seconds = float(max_duration_seconds)
         self._max_samples = int(sample_rate * max_duration_seconds)
+        self._capture_sample_rate = sample_rate
         if self._max_samples <= 0:
             raise ValueError("max_duration_seconds is shorter than one sample")
 
@@ -98,7 +100,7 @@ class SoundDeviceRecorder:
 
     @property
     def max_duration_seconds(self) -> float:
-        return self._max_samples / self._sample_rate
+        return self._max_duration_seconds
 
     @property
     def input_level(self) -> float:
@@ -172,36 +174,28 @@ class SoundDeviceRecorder:
             used_fallback = device_id is not None
 
         selected_index = input_indexes.get(selected_id) if selected_id is not None else None
-        with self._lock:
-            self._completion_event.clear()
-            self._completion_reason = None
-            self._capture_error_message = None
-        try:
-            stream = self._sd.InputStream(
-                device=selected_index,
-                samplerate=self._sample_rate,
-                channels=1,
-                dtype="float32",
-                callback=self._audio_callback,
-                finished_callback=self._stream_finished_callback,
-            )
-        except Exception as error:
-            raise AudioDeviceError("Selected microphone could not open at 16 kHz mono") from error
+        capture_rates = [self._sample_rate]
+        if selected_index is not None:
+            native_rate = round(_float_value(devices[selected_index].get("default_samplerate")))
+            if native_rate > 0 and native_rate != self._sample_rate:
+                capture_rates.append(native_rate)
 
-        with self._lock:
-            self._blocks = []
-            self._sample_count = 0
-            self._input_level = 0.0
-            self._limit_reached = False
-            self._active_device_id = selected_id
-            self._used_default_fallback = used_fallback
-            self._stream = stream
-
-        try:
-            stream.start()
-        except Exception as error:
-            self._close_failed_start(stream)
-            raise AudioDeviceError("Selected microphone could not open at 16 kHz mono") from error
+        last_error: Exception | None = None
+        for capture_rate in capture_rates:
+            try:
+                self._start_stream(
+                    selected_index=selected_index,
+                    selected_id=selected_id,
+                    used_fallback=used_fallback,
+                    capture_rate=capture_rate,
+                )
+            except Exception as error:
+                last_error = error
+                continue
+            return
+        raise AudioDeviceError(
+            "Selected microphone could not open at 16 kHz mono or its native sample rate"
+        ) from last_error
 
     def stop(self) -> RecordedAudio:
         with self._lock:
@@ -230,6 +224,7 @@ class SoundDeviceRecorder:
             completion_reason = self._completion_reason
             capture_error_message = self._capture_error_message
             blocks = self._blocks
+            capture_sample_rate = self._capture_sample_rate
             self._blocks = []
             self._sample_count = 0
             self._stream = None
@@ -246,6 +241,11 @@ class SoundDeviceRecorder:
             samples = np.concatenate(blocks).astype(np.float32, copy=False)
         else:
             samples = np.empty(0, dtype=np.float32)
+        samples = _resample_mono(
+            samples,
+            input_sample_rate=capture_sample_rate,
+            output_sample_rate=self._sample_rate,
+        )
         return RecordedAudio(
             samples=cast(Sequence[float], samples),
             sample_rate=self._sample_rate,
@@ -278,6 +278,43 @@ class SoundDeviceRecorder:
             return self._sd.query_devices()
         except Exception as error:
             raise AudioDeviceError("Could not enumerate input devices") from error
+
+    def _start_stream(
+        self,
+        *,
+        selected_index: int | None,
+        selected_id: str | None,
+        used_fallback: bool,
+        capture_rate: int,
+    ) -> None:
+        with self._lock:
+            self._completion_event.clear()
+            self._completion_reason = None
+            self._capture_error_message = None
+        stream = self._sd.InputStream(
+            device=selected_index,
+            samplerate=capture_rate,
+            channels=1,
+            dtype="float32",
+            callback=self._audio_callback,
+            finished_callback=self._stream_finished_callback,
+        )
+        with self._lock:
+            self._blocks = []
+            self._sample_count = 0
+            self._max_samples = int(capture_rate * self._max_duration_seconds)
+            self._capture_sample_rate = capture_rate
+            self._input_level = 0.0
+            self._limit_reached = False
+            self._active_device_id = selected_id
+            self._used_default_fallback = used_fallback
+            self._stream = stream
+
+        try:
+            stream.start()
+        except Exception:
+            self._close_failed_start(stream)
+            raise
 
     def _query_host_api_names(self) -> Mapping[int, str]:
         try:
@@ -421,3 +458,24 @@ def _stream_is_active(stream: _InputStream) -> bool:
         return bool(stream.active)
     except Exception:
         return False
+
+
+def _resample_mono(
+    samples: NDArray[np.float32],
+    *,
+    input_sample_rate: int,
+    output_sample_rate: int,
+) -> NDArray[np.float32]:
+    if samples.size == 0 or input_sample_rate == output_sample_rate:
+        return samples
+    output_count = max(1, round(samples.size * output_sample_rate / input_sample_rate))
+    source_positions = np.arange(output_count, dtype=np.float64) * (
+        input_sample_rate / output_sample_rate
+    )
+    source_positions = np.minimum(source_positions, samples.size - 1)
+    resampled = np.interp(
+        source_positions,
+        np.arange(samples.size, dtype=np.float64),
+        samples,
+    )
+    return resampled.astype(np.float32, copy=False)

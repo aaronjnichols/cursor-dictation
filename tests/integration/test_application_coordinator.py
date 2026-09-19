@@ -4,7 +4,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from threading import Event
+from threading import Event, Timer
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
@@ -143,6 +143,7 @@ class FakeRecorder:
         self.cancel_count = 0
         self.input_level = 0.42
         self.is_recording = False
+        self.used_default_fallback = False
 
     def list_devices(self) -> tuple[AudioDevice, ...]:
         return self.devices
@@ -204,7 +205,11 @@ class FakeStartupManager:
 
 
 class FakeDelivery:
+    def __init__(self) -> None:
+        self.inserted: list[str] = []
+
     def insert_at_cursor(self, text: str) -> DeliveryResult:
+        self.inserted.append(text)
         return DeliveryResult.ok(DeliveryMethod.CLIPBOARD_PASTE)
 
     def copy_to_clipboard(self, text: str) -> DeliveryResult:
@@ -281,6 +286,103 @@ def test_first_run_waits_for_model_before_enabling_dictation(qtbot, tmp_path: Pa
     coordinator.close()
 
 
+def test_invalid_custom_model_reports_to_settings_when_setup_is_also_visible(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=False)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.set_custom_model_path(tmp_path / "invalid-model")
+
+    coordinator.save_settings()
+
+    assert coordinator.setup_window.isVisible()
+    assert coordinator.settings_window.isVisible()
+    assert coordinator.settings_window.save_button.isEnabled()
+    assert coordinator.settings_window.close_button.isEnabled()
+    assert "does not exist" in coordinator.settings_window.status_text
+    coordinator.close()
+
+
+def test_closing_settings_during_first_run_restores_setup_state(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=False)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.show_settings()
+    assert coordinator.state is AppState.SETTINGS_OPEN
+
+    coordinator.settings_window.close()
+
+    assert coordinator.setup_window.isVisible()
+    assert coordinator.state is AppState.FIRST_RUN_SETUP
+    coordinator.close()
+
+
+def test_closing_settings_after_invalid_first_run_model_restores_setup_state(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=False)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.set_custom_model_path(tmp_path / "invalid-model")
+    coordinator.save_settings()
+
+    coordinator.settings_window.close()
+
+    assert coordinator.setup_window.isVisible()
+    assert coordinator.state is AppState.FIRST_RUN_SETUP
+    coordinator.close()
+
+
+def test_same_custom_model_path_is_retried_when_no_engine_is_active(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    custom_model = tmp_path / "repaired-model"
+    custom_model.mkdir()
+    (custom_model / "model.bin").write_bytes(b"model")
+    (custom_model / "config.json").write_text('{"language":"en"}', encoding="utf-8")
+    (custom_model / "tokenizer.json").write_text("{}", encoding="utf-8")
+    coordinator, _, settings_store, _, _ = make_coordinator(
+        tmp_path,
+        installed=False,
+        model_load_error=RuntimeError("model was broken"),
+    )
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    settings_store.save(
+        replace(
+            AppSettings(),
+            model_path=str(custom_model),
+            model_source=ModelSource.CUSTOM,
+        )
+    )
+    coordinator.start()
+    assert coordinator.runtime is None
+    assert "model was broken" in coordinator.settings_window.status_text
+    coordinator._model_manager._engine_factory = lambda: FakeEngine()  # type: ignore[attr-defined]
+
+    coordinator.save_settings()
+
+    assert coordinator.runtime is not None
+    assert coordinator.state is AppState.IDLE
+    coordinator.close()
+
+
 def test_first_run_setup_can_test_selected_microphone(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=False)
     qtbot.addWidget(coordinator.setup_window)
@@ -316,6 +418,39 @@ def test_installed_model_starts_ready_runtime_and_registers_hotkeys(qtbot, tmp_p
     assert len(hotkeys.configurations) == 1
     coordinator.close()
     assert hotkeys.closed
+
+
+def test_missing_pinned_microphone_notifies_user_and_logs_once(
+    qtbot,
+    tmp_path: Path,
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
+    coordinator, hotkeys, _, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    recorder = coordinator._recorder  # type: ignore[attr-defined]
+    assert isinstance(recorder, FakeRecorder)
+    recorder.used_default_fallback = True
+    warnings: list[str] = []
+    monkeypatch.setattr(coordinator, "_log_warning", warnings.append)
+    coordinator.start()
+
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
+
+    assert coordinator.overlay.status_text == (
+        "Selected microphone unavailable; using Windows default"
+    )
+    assert warnings == ["microphone_default_fallback"]
+
+    hotkeys.cancel_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.IDLE)
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
+
+    assert warnings == ["microphone_default_fallback"]
+    coordinator.close()
 
 
 def test_first_run_install_persists_microphone_and_becomes_ready(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
@@ -855,18 +990,29 @@ def test_invalid_model_task_result_restores_settings_editor(qtbot, tmp_path: Pat
 def test_shutdown_waits_for_background_worker_and_ignores_late_callbacks(
     qtbot,
     tmp_path: Path,
+    monkeypatch,
 ) -> None:  # type: ignore[no-untyped-def]
+    events: list[str] = []
+
     class DelayedShutdownRunner(ImmediateTaskRunner):
         def shutdown(self, timeout_ms: int = 5_000) -> bool:
+            events.append("worker-wait")
             self.shutdown_calls.append(timeout_ms)
             return timeout_ms == -1
 
     runner = DelayedShutdownRunner()
-    coordinator, _, _, _, _ = make_coordinator(
+    coordinator, hotkeys, _, _, _ = make_coordinator(
         tmp_path,
         installed=False,
         task_runner=runner,
     )
+    original_close = hotkeys.close
+
+    def close_hotkeys() -> None:
+        events.append("hotkeys-closed")
+        original_close()
+
+    monkeypatch.setattr(hotkeys, "close", close_hotkeys)
     qtbot.addWidget(coordinator.setup_window)
     qtbot.addWidget(coordinator.settings_window)
     qtbot.addWidget(coordinator.overlay)
@@ -876,8 +1022,39 @@ def test_shutdown_waits_for_background_worker_and_ignores_late_callbacks(
     runner.failed.emit(RuntimeError("late callback"))
 
     assert runner.shutdown_calls == [5_000, -1]
+    assert events[:2] == ["hotkeys-closed", "worker-wait"]
     assert not coordinator.setup_window.isVisible()
     assert not coordinator.settings_window.isVisible()
+
+
+def test_close_during_transcription_never_delivers_late_result(
+    qtbot,
+    tmp_path: Path,
+) -> None:  # type: ignore[no-untyped-def]
+    transcribe_gate = Event()
+    coordinator, hotkeys, _, _, _ = make_coordinator(
+        tmp_path,
+        installed=True,
+        transcribe_gate=transcribe_gate,
+    )
+    qtbot.addWidget(coordinator.setup_window)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.TRANSCRIBING)
+    delivery = coordinator._delivery  # type: ignore[attr-defined]
+    assert isinstance(delivery, FakeDelivery)
+    release = Timer(0.05, transcribe_gate.set)
+    release.start()
+
+    coordinator.close()
+    release.join(timeout=1)
+    QApplication.processEvents()
+
+    assert delivery.inserted == []
 
 
 def test_settings_save_updates_persistence_vocabulary_and_runtime(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]

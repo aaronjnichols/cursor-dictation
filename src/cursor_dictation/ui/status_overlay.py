@@ -18,6 +18,7 @@ class StatusOverlay(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self._active = False
+        self._state = AppState.STARTING
         self._elapsed = QElapsedTimer()
 
         outer = QHBoxLayout(self)
@@ -28,12 +29,12 @@ class StatusOverlay(QWidget):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(8)
 
-        dot = QLabel("●")
-        dot.setObjectName("statusDot")
+        self._waveform_label = QLabel("▁▁▁▁▁")
+        self._waveform_label.setObjectName("statusWaveform")
         self._status_label = QLabel("Ready")
         self._elapsed_label = QLabel("")
         self._elapsed_label.setObjectName("muted")
-        layout.addWidget(dot)
+        layout.addWidget(self._waveform_label)
         layout.addWidget(self._status_label)
         layout.addWidget(self._elapsed_label)
         outer.addWidget(card)
@@ -43,7 +44,7 @@ class StatusOverlay(QWidget):
         self._elapsed_timer.timeout.connect(self._update_elapsed)
         self._dismiss_timer = QTimer(self)
         self._dismiss_timer.setSingleShot(True)
-        self._dismiss_timer.timeout.connect(self.hide)
+        self._dismiss_timer.timeout.connect(self._dismiss_feedback)
 
     @property
     def status_text(self) -> str:
@@ -53,12 +54,30 @@ class StatusOverlay(QWidget):
     def is_active(self) -> bool:
         return self._active
 
+    @property
+    def waveform_text(self) -> str:
+        return self._waveform_label.text()
+
+    def set_input_level(self, level: float) -> None:
+        glyphs = "▁▂▃▄▅▆▇█"
+        peak = round(max(0.0, min(1.0, level)) * (len(glyphs) - 1))
+        indexes = (
+            round(peak * 0.5),
+            round(peak * 0.75),
+            peak,
+            round(peak * 0.75),
+            round(peak * 0.5),
+        )
+        self._waveform_label.setText("".join(glyphs[index] for index in indexes))
+
     def set_state(self, state: AppState) -> None:
+        self._state = state
         self._dismiss_timer.stop()
         if state is AppState.RECORDING:
             self._active = True
             self._status_label.setText("Recording...")
             self._elapsed_label.setText("0:00")
+            self.set_input_level(0.0)
             self._elapsed.start()
             self._elapsed_timer.start()
             self._show_without_focus()
@@ -104,7 +123,30 @@ class StatusOverlay(QWidget):
         self._status_label.setText(message)
         self._active = True
         self._show_without_focus()
-        self._dismiss_timer.start(timeout_ms)
+        if self._state not in {AppState.ERROR, AppState.ERROR_WITH_TRANSCRIPT}:
+            self._dismiss_timer.start(timeout_ms)
+
+    def _dismiss_feedback(self) -> None:
+        if self._state in {AppState.ERROR, AppState.ERROR_WITH_TRANSCRIPT}:
+            return
+        if self._state is AppState.RECORDING:
+            self._active = True
+            self._status_label.setText("Recording...")
+            self._update_elapsed()
+            self._elapsed_timer.start()
+            self._show_without_focus()
+            return
+        if self._state in {
+            AppState.TRANSCRIBING,
+            AppState.LOADING_MODEL,
+            AppState.DELIVERING,
+        }:
+            self.set_state(self._state)
+            return
+        self._active = False
+        self._status_label.setText("Ready")
+        self._elapsed_label.clear()
+        self.hide()
 
     def _show_without_focus(self) -> None:
         self.adjustSize()
@@ -119,4 +161,11 @@ class StatusOverlay(QWidget):
     def _update_elapsed(self) -> None:
         milliseconds = self._elapsed.elapsed()
         seconds = max(0, milliseconds // 1000)
+        self._display_recording_time(seconds)
+
+    def _display_recording_time(self, seconds: int) -> None:
         self._elapsed_label.setText(f"{seconds // 60}:{seconds % 60:02d}")
+        if seconds >= 9 * 60:
+            self._status_label.setText("Recording... 1 minute left")
+        else:
+            self._status_label.setText("Recording...")

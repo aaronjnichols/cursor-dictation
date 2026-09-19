@@ -3,6 +3,9 @@ from __future__ import annotations
 import threading
 from collections.abc import Sequence
 
+import pytest
+from PySide6.QtWidgets import QApplication
+
 from cursor_dictation.application.qt_transcription_queue import QtTranscriptionQueue
 from cursor_dictation.core.models import (
     DeliveryMode,
@@ -82,3 +85,29 @@ def test_failure_callback_returns_original_exception(qtbot) -> None:  # type: ig
     assert isinstance(failures[0][1], RuntimeError)
     assert str(failures[0][1]) == "local inference failed"
     queue.shutdown()
+
+
+@pytest.mark.parametrize("engine", [SuccessfulEngine(), FailingEngine()])
+def test_shutdown_discards_queued_worker_completion(engine: object) -> None:
+    queue = QtTranscriptionQueue(lambda: engine)  # type: ignore[arg-type]
+    successes: list[Transcript] = []
+    failures: list[Exception] = []
+    queue.submit(
+        request(),
+        lambda _session_id, transcript: successes.append(transcript),
+        lambda _session_id, error: failures.append(error),
+    )
+
+    assert queue.shutdown()
+    QApplication.processEvents()
+
+    assert successes == []
+    assert failures == []
+
+
+def test_closed_queue_rejects_new_jobs() -> None:
+    queue = QtTranscriptionQueue(SuccessfulEngine)
+    assert queue.shutdown()
+
+    with pytest.raises(RuntimeError, match="closed"):
+        queue.submit(request(), lambda *_args: None, lambda *_args: None)

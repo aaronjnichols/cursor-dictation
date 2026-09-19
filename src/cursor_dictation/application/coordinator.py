@@ -116,6 +116,7 @@ class ApplicationCoordinator:
         self._closing = False
         self._microphone_test_active = False
         self._microphone_test_surface: _MicrophoneTestSurface | None = None
+        self._microphone_fallback_notified = False
         self._microphone_test_timer = QTimer()
         self._microphone_test_timer.setInterval(100)
         self._microphone_test_timer.timeout.connect(self._poll_microphone_test)
@@ -243,6 +244,7 @@ class ApplicationCoordinator:
         model_changed = (
             settings.model_path != self._settings.model_path
             or settings.model_source is not self._settings.model_source
+            or self._model_manager.active_engine is None
         )
         if model_changed:
             if settings.model_source is ModelSource.RECOMMENDED:
@@ -329,12 +331,6 @@ class ApplicationCoordinator:
         self._stop_microphone_test()
         if self.runtime is not None:
             self.runtime.close()
-        if self._transcription_queue is not None and not self._transcription_queue.shutdown():
-            self._log_warning("transcription_shutdown_delayed")
-            self._transcription_queue.shutdown(-1)
-        if not self._task_runner.shutdown():
-            self._log_warning("task_shutdown_delayed")
-            self._task_runner.shutdown(-1)
         self._hotkeys.close()
         self._hotkeys_configured = False
         self.tray.hide()
@@ -342,6 +338,12 @@ class ApplicationCoordinator:
         self.setup_window.close_for_application()
         self.settings_window.set_editing_enabled(True)
         self.settings_window.close()
+        if self._transcription_queue is not None and not self._transcription_queue.shutdown():
+            self._log_warning("transcription_shutdown_delayed")
+            self._transcription_queue.shutdown(-1)
+        if not self._task_runner.shutdown():
+            self._log_warning("task_shutdown_delayed")
+            self._task_runner.shutdown(-1)
 
     def _show_configuration_error(self, error: Exception) -> None:
         self._set_state(AppState.ERROR)
@@ -420,10 +422,10 @@ class ApplicationCoordinator:
         if self._task_kind is _TaskKind.INSTALL:
             self.setup_window.set_progress(percent, message)
         elif self._task_kind is _TaskKind.SETTINGS_MODEL:
-            if self.setup_window.isVisible():
-                self.setup_window.set_progress(percent, message)
-            else:
+            if self.settings_window.isVisible():
                 self.settings_window.set_status(message)
+            else:
+                self.setup_window.set_progress(percent, message)
 
     def _task_succeeded(self, result: object) -> None:
         if self._closing:
@@ -449,10 +451,10 @@ class ApplicationCoordinator:
             self.settings_window.set_editing_enabled(True)
             if pending is None:
                 message = "The pending settings were lost."
-                if self.setup_window.isVisible():
-                    self.setup_window.set_error(message)
-                else:
+                if self.settings_window.isVisible():
                     self.settings_window.set_status(message, error=True)
+                else:
+                    self.setup_window.set_error(message)
                 return
             if self._commit_settings(*pending, arm_if_possible=False):
                 self._pending_settings = None
@@ -469,7 +471,7 @@ class ApplicationCoordinator:
                     )
                     self._set_state(next_state)
                 self._setup_model_switch = False
-            elif self.setup_window.isVisible():
+            elif not self.settings_window.isVisible() and self.setup_window.isVisible():
                 self.setup_window.set_error(
                     self.settings_window.status_text or "Settings could not be saved."
                 )
@@ -491,12 +493,12 @@ class ApplicationCoordinator:
             self.setup_window.set_error(str(error))
             return
         if task_kind is _TaskKind.SETTINGS_MODEL:
-            if self.setup_window.isVisible():
-                self.setup_window.set_error(str(error))
-            else:
-                self._pending_settings = None
-                self.settings_window.set_editing_enabled(True)
+            self._pending_settings = None
+            self.settings_window.set_editing_enabled(True)
+            if self.settings_window.isVisible():
                 self.settings_window.set_status(str(error), error=True)
+            else:
+                self.setup_window.set_error(str(error))
             return
         if self._settings.model_source is ModelSource.RECOMMENDED:
             self._show_setup(str(error))
@@ -565,7 +567,6 @@ class ApplicationCoordinator:
                 history=self._history,
                 completion_listener=self._completion_feedback,
             )
-            self._controller.add_state_listener(self._controller_state_changed)
             self.runtime = DictationRuntime(
                 controller=self._controller,
                 recorder=self._recorder,
@@ -573,6 +574,7 @@ class ApplicationCoordinator:
                 tray=self.tray,
                 overlay=self.overlay,
             )
+            self._controller.add_state_listener(self._controller_state_changed)
         else:
             self.runtime.set_enabled(True)
         self.setup_window.close_for_application()
@@ -676,7 +678,10 @@ class ApplicationCoordinator:
             return
         if self.runtime is not None:
             self.runtime.set_enabled(True)
-        next_state = self._controller.state if self._controller is not None else self._state
+        if self.runtime is None and self.setup_window.isVisible():
+            next_state = AppState.FIRST_RUN_SETUP
+        else:
+            next_state = self._controller.state if self._controller is not None else self._state
         self._set_state(next_state)
 
     def _toggle_microphone_test(self, surface: _MicrophoneTestSurface) -> None:
@@ -808,8 +813,13 @@ class ApplicationCoordinator:
         if self.settings_window.isVisible():
             return
         self._state = state
-        if state is AppState.RECORDING and self._settings.sound_cues_enabled:
-            QApplication.beep()
+        if state is AppState.RECORDING:
+            if self._settings.sound_cues_enabled:
+                QApplication.beep()
+            if self._recorder.used_default_fallback and not self._microphone_fallback_notified:
+                self._microphone_fallback_notified = True
+                self.overlay.show_error("Selected microphone unavailable; using Windows default")
+                self._log_warning("microphone_default_fallback")
 
     def _completion_feedback(self, mode: DeliveryMode, result: DeliveryResult) -> None:
         if self._settings.sound_cues_enabled:

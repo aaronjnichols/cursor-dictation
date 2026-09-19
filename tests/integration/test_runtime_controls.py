@@ -35,6 +35,7 @@ class FakeRecorder:
     stops: int = 0
     cancels: int = 0
     completion: RecordingCompletionReason | None = None
+    input_level: float = 0.0
 
     def start(self, device_id: str | None) -> None:
         self.starts += 1
@@ -163,6 +164,18 @@ def test_audio_limit_completion_stops_and_transcribes(qtbot) -> None:  # type: i
     runtime.close()
 
 
+def test_runtime_updates_recording_waveform_from_microphone_level(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    recorder.input_level = 1.0
+
+    runtime.poll_audio_completion()
+
+    assert "█" in overlay.waveform_text
+    runtime.close()
+
+
 def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
     hotkeys.toggle_pressed.emit()
@@ -176,6 +189,9 @@ def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type:
 
     assert recorder.starts == 1
     assert overlay.status_text == "Transcribing..."
+    qtbot.wait(1_700)
+    assert overlay.isVisible()
+    assert overlay.status_text == "Transcribing locally..."
     runtime.close()
 
 

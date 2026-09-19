@@ -82,6 +82,7 @@ class FakeSoundDevice:
         devices: list[dict[str, object]],
         *,
         default_input: int | None,
+        rejected_sample_rates: set[int] | None = None,
     ) -> None:
         self._devices = devices
         input_index = default_input if default_input is not None else -1
@@ -89,6 +90,7 @@ class FakeSoundDevice:
         self.default = SimpleNamespace(device=default_pair)
         self.streams: list[FakeStream] = []
         self.next_start_error: Exception | None = None
+        self.rejected_sample_rates = rejected_sample_rates or set()
 
     def query_devices(self) -> list[dict[str, object]]:
         return self._devices
@@ -104,7 +106,12 @@ class FakeSoundDevice:
 
     def InputStream(self, **kwargs: Any) -> FakeStream:
         stream = FakeStream(**kwargs)
-        stream.start_error = self.next_start_error
+        sample_rate = int(kwargs["samplerate"])
+        stream.start_error = (
+            RuntimeError("invalid sample rate")
+            if sample_rate in self.rejected_sample_rates
+            else self.next_start_error
+        )
         self.streams.append(stream)
         return stream
 
@@ -206,6 +213,33 @@ def test_capture_buffers_float32_samples_and_reports_level() -> None:
     assert recorder.input_level == pytest.approx(np.sqrt(0.375))
     assert backend.streams[-1].stopped is True
     assert backend.streams[-1].closed is True
+
+
+def test_device_native_capture_is_resampled_when_16khz_is_rejected() -> None:
+    backend = FakeSoundDevice(
+        [
+            {
+                "name": "Native-only microphone",
+                "hostapi": 3,
+                "max_input_channels": 1,
+                "default_samplerate": 48_000.0,
+            }
+        ],
+        default_input=0,
+        rejected_sample_rates={16_000},
+    )
+    recorder = SoundDeviceRecorder(sd_module=backend)
+
+    recorder.start(None)
+    backend.streams[-1].push(np.linspace(-0.5, 0.5, 480, dtype=np.float32).tolist())
+    audio = recorder.stop()
+
+    assert [stream.kwargs["samplerate"] for stream in backend.streams] == [16_000, 48_000]
+    assert backend.streams[0].closed is True
+    assert audio.sample_rate == 16_000
+    assert len(audio.samples) == 160
+    assert audio.duration_seconds == pytest.approx(0.01)
+    assert np.asarray(audio.samples).dtype == np.float32
 
 
 def test_cancel_closes_stream_and_discards_buffer() -> None:

@@ -75,6 +75,7 @@ class QtTranscriptionQueue(QObject):
         self._thread_pool = thread_pool or QThreadPool(self)
         self._thread_pool.setMaxThreadCount(1)
         self._callbacks: dict[str, tuple[SuccessCallback, FailureCallback]] = {}
+        self._closed = False
         self._signals = _WorkerSignals(self)
         connection = Qt.ConnectionType.QueuedConnection
         self._signals.succeeded.connect(self._complete_success, connection)
@@ -88,16 +89,22 @@ class QtTranscriptionQueue(QObject):
     ) -> None:
         if QThread.currentThread() is not self.thread():
             raise RuntimeError("Transcription jobs must be submitted from the Qt owner thread.")
+        if self._closed:
+            raise RuntimeError("Transcription queue is closed.")
         if request.session_id in self._callbacks:
             raise ValueError(f"A transcription job already uses {request.session_id}.")
         self._callbacks[request.session_id] = (on_success, on_failure)
         self._thread_pool.start(_TranscriptionWorker(self._engine_provider, request, self._signals))
 
     def shutdown(self, timeout_ms: int = 5_000) -> bool:
+        self._closed = True
+        self._callbacks.clear()
         return self._thread_pool.waitForDone(timeout_ms)
 
     @Slot(str, object)
     def _complete_success(self, session_id: str, value: object) -> None:
+        if self._closed:
+            return
         callbacks = self._callbacks.pop(session_id, None)
         if callbacks is None:
             return
@@ -108,6 +115,8 @@ class QtTranscriptionQueue(QObject):
 
     @Slot(str, object)
     def _complete_failure(self, session_id: str, value: object) -> None:
+        if self._closed:
+            return
         callbacks = self._callbacks.pop(session_id, None)
         if callbacks is None:
             return
