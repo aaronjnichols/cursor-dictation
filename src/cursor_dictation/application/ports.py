@@ -20,6 +20,8 @@ class AudioRecorder(Protocol):
 
 
 class TranscriptionQueue(Protocol):
+    """Runs transcription and returns callbacks on the controller's owning thread."""
+
     def submit(
         self,
         request: TranscriptionRequest,

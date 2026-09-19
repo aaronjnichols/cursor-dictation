@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from contextlib import suppress
 
 from cursor_dictation.application.ports import AudioRecorder, TextDelivery, TranscriptionQueue
 from cursor_dictation.core.events import Event
@@ -25,6 +26,7 @@ class DictationController:
         vocabulary: Callable[[], Sequence[str]],
         selected_device: Callable[[], str | None],
         session_ids: Callable[[], str],
+        observer_error: Callable[[Exception], None] | None = None,
         initial_state: AppState = AppState.IDLE,
     ) -> None:
         self._recorder = recorder
@@ -33,6 +35,7 @@ class DictationController:
         self._vocabulary = vocabulary
         self._selected_device = selected_device
         self._session_ids = session_ids
+        self._observer_error = observer_error
         self._state = initial_state
         self._active_session: str | None = None
         self._delivery_mode: DeliveryMode | None = None
@@ -80,14 +83,14 @@ class DictationController:
             return False
 
         self._move(Event.RECORDING_COMPLETED)
-        request = TranscriptionRequest(
-            session_id=session_id,
-            audio=audio,
-            language="en",
-            vocabulary=tuple(self._vocabulary()),
-            delivery_mode=mode,
-        )
         try:
+            request = TranscriptionRequest(
+                session_id=session_id,
+                audio=audio,
+                language="en",
+                vocabulary=tuple(self._vocabulary()),
+                delivery_mode=mode,
+            )
             self._transcription_queue.submit(
                 request,
                 self._transcription_succeeded,
@@ -101,7 +104,15 @@ class DictationController:
     def cancel(self) -> bool:
         if self._state is not AppState.RECORDING:
             return False
-        self._recorder.cancel()
+        try:
+            self._recorder.cancel()
+        except Exception as error:
+            self._active_session = None
+            self._delivery_mode = None
+            self.last_error = str(error)
+            self.last_transcript = None
+            self._move(Event.OPERATION_FAILED)
+            return False
         self._active_session = None
         self._delivery_mode = None
         self.last_error = None
@@ -120,7 +131,11 @@ class DictationController:
     def copy_recoverable_transcript(self) -> bool:
         if self._state is not AppState.ERROR_WITH_TRANSCRIPT or self.last_transcript is None:
             return False
-        result = self._delivery.copy_to_clipboard(self.last_transcript)
+        try:
+            result = self._delivery.copy_to_clipboard(self.last_transcript)
+        except Exception as error:
+            self.last_error = str(error)
+            return False
         if not result.success:
             self.last_error = result.error_code or "copy_failed"
             return False
@@ -176,7 +191,12 @@ class DictationController:
     def _move(self, event: Event) -> None:
         self._state = transition(self._state, event)
         for listener in tuple(self._state_listeners):
-            listener(self._state)
+            try:
+                listener(self._state)
+            except Exception as error:
+                if self._observer_error is not None:
+                    with suppress(Exception):
+                        self._observer_error(error)
 
     def _require_session(self) -> str:
         if self._active_session is None:

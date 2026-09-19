@@ -23,6 +23,10 @@ from cursor_dictation.core.state_machine import InvalidTransition, transition
         (AppState.SETTINGS_OPEN, Event.SETTINGS_CLOSED, AppState.IDLE),
         (AppState.ERROR, Event.RESET, AppState.IDLE),
         (AppState.ERROR_WITH_TRANSCRIPT, Event.RESET, AppState.IDLE),
+        (AppState.ERROR, Event.MODEL_LOAD_REQUESTED, AppState.LOADING_MODEL),
+        (AppState.ERROR_WITH_TRANSCRIPT, Event.MODEL_LOAD_REQUESTED, AppState.LOADING_MODEL),
+        (AppState.ERROR, Event.FIRST_RUN_REQUIRED, AppState.FIRST_RUN_SETUP),
+        (AppState.ERROR_WITH_TRANSCRIPT, Event.FIRST_RUN_REQUIRED, AppState.FIRST_RUN_SETUP),
     ],
 )
 def test_valid_transition(state: AppState, event: Event, expected: AppState) -> None:
