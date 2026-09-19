@@ -11,8 +11,8 @@ build/
 dist/
 *.spec.local
 *.log
-models/
-recordings/
+/models/
+/recordings/
 .idea/
 .vscode/
 Thumbs.db
