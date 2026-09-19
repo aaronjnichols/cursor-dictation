@@ -66,10 +66,21 @@ class FakeQueue:
 
 
 class FakeDelivery:
+    def __init__(self) -> None:
+        self.fail_insert = False
+        self.copied: list[str] = []
+
     def insert_at_cursor(self, text: str) -> DeliveryResult:
+        if self.fail_insert:
+            return DeliveryResult.failed(
+                DeliveryMethod.CLIPBOARD_PASTE,
+                error_code="paste_failed",
+                recoverable=True,
+            )
         return DeliveryResult.ok(DeliveryMethod.CLIPBOARD_PASTE)
 
     def copy_to_clipboard(self, text: str) -> DeliveryResult:
+        self.copied.append(text)
         return DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY)
 
 
@@ -157,4 +168,47 @@ def test_disabled_runtime_rejects_hotkeys_while_settings_are_open(qtbot) -> None
     assert controller.state is AppState.IDLE
     assert recorder.starts == 0
     assert overlay.status_text == "Close Settings to start dictation"
+    runtime.close()
+
+
+def test_tray_copy_recovers_transcript_after_delivery_failure(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, _, queue, hotkeys, tray, overlay = make_runtime(qtbot)
+    delivery = controller._delivery  # type: ignore[attr-defined]
+    assert isinstance(delivery, FakeDelivery)
+    delivery.fail_insert = True
+    hotkeys.toggle_pressed.emit()
+    hotkeys.toggle_pressed.emit()
+    request = queue.requests[-1]
+    controller._transcription_succeeded(  # type: ignore[attr-defined]
+        request.session_id,
+        Transcript("Keep this transcript."),
+    )
+    assert controller.state is AppState.ERROR_WITH_TRANSCRIPT
+
+    tray.copy_action.trigger()
+
+    assert delivery.copied == ["Keep this transcript."]
+    assert controller.state is AppState.IDLE
+    assert overlay.status_text == "Copied"
+    runtime.close()
+
+
+def test_cancel_discards_a_recoverable_transcript(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, _, queue, hotkeys, tray, _ = make_runtime(qtbot)
+    delivery = controller._delivery  # type: ignore[attr-defined]
+    assert isinstance(delivery, FakeDelivery)
+    delivery.fail_insert = True
+    hotkeys.toggle_pressed.emit()
+    hotkeys.toggle_pressed.emit()
+    request = queue.requests[-1]
+    controller._transcription_succeeded(  # type: ignore[attr-defined]
+        request.session_id,
+        Transcript("No longer needed."),
+    )
+
+    tray.cancel_action.trigger()
+
+    assert controller.state is AppState.IDLE
+    assert controller.last_transcript is None
+    assert tray.start_action.isEnabled()
     runtime.close()

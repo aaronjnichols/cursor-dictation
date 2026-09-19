@@ -148,6 +148,33 @@ def test_lists_only_input_devices_and_marks_default() -> None:
     assert devices[0].default_sample_rate == 48000.0
 
 
+def test_duplicate_names_on_same_host_api_get_distinct_device_ids() -> None:
+    backend = FakeSoundDevice(
+        [
+            {
+                "name": "USB microphone",
+                "hostapi": 3,
+                "max_input_channels": 1,
+                "default_samplerate": 48_000.0,
+            },
+            {
+                "name": "USB microphone",
+                "hostapi": 3,
+                "max_input_channels": 1,
+                "default_samplerate": 48_000.0,
+            },
+        ],
+        default_input=0,
+    )
+    recorder = SoundDeviceRecorder(sd_module=backend)
+
+    devices = recorder.list_devices()
+
+    assert devices[0].id != devices[1].id
+    recorder.start(devices[1].id)
+    assert backend.streams[-1].kwargs["device"] == 1
+
+
 def test_missing_pinned_device_falls_back_to_current_default() -> None:
     backend = _backend()
     recorder = SoundDeviceRecorder(sd_module=backend)

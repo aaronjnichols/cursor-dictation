@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -85,47 +87,85 @@ class DefaultModelInstaller:
 
         self.models_root.mkdir(parents=True, exist_ok=True)
         self.downloads_root.mkdir(parents=True, exist_ok=True)
+        self._remove_abandoned_partials()
         partial = self.downloads_root / f"{self.manifest.model_id}-{uuid4().hex}.partial"
         partial.mkdir()
-
-        notify(5, "Downloading pinned model files...")
         try:
-            self._snapshot_download(
-                repo_id=self.manifest.repository,
-                revision=self.manifest.revision,
-                local_dir=str(partial),
-                allow_patterns=tuple(self.manifest.required_files),
-            )
-        except Exception as error:
-            raise ModelInstallError(f"Model download failed: {error}") from error
-        if cancelled():
-            raise InstallCancelled("Model installation was cancelled.")
+            notify(5, "Downloading pinned model files...")
+            try:
+                self._snapshot_download(
+                    repo_id=self.manifest.repository,
+                    revision=self.manifest.revision,
+                    local_dir=str(partial),
+                    allow_patterns=tuple(self.manifest.required_files),
+                )
+            except Exception as error:
+                raise ModelInstallError(f"Model download failed: {error}") from error
+            if cancelled():
+                raise InstallCancelled("Model installation was cancelled.")
 
-        notify(82, "Verifying model files...")
-        try:
-            validate_model_files(partial, self.manifest)
-        except (ModelFileValidationError, OSError) as error:
-            raise ModelInstallError(f"Model verification failed: {error}") from error
+            notify(82, "Verifying model files...")
+            try:
+                validate_model_files(partial, self.manifest)
+            except (ModelFileValidationError, OSError) as error:
+                raise ModelInstallError(f"Model verification failed: {error}") from error
 
-        notify(90, "Loading model locally...")
-        try:
-            self._smoke_load(partial)
-        except Exception as error:
-            raise ModelInstallError(f"Model smoke load failed: {error}") from error
-        if cancelled():
-            raise InstallCancelled("Model installation was cancelled.")
+            notify(90, "Loading model locally...")
+            try:
+                self._smoke_load(partial)
+            except Exception as error:
+                raise ModelInstallError(f"Model smoke load failed: {error}") from error
+            if cancelled():
+                raise InstallCancelled("Model installation was cancelled.")
 
-        try:
-            (partial / "cursor-dictation-manifest.json").write_text(
-                json.dumps(_manifest_payload(self.manifest), indent=2, sort_keys=True) + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-            os.replace(partial, self.target_directory)
-        except OSError as error:
-            raise ModelInstallError(f"Could not activate the verified model: {error}") from error
+            try:
+                (partial / "cursor-dictation-manifest.json").write_text(
+                    json.dumps(_manifest_payload(self.manifest), indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                os.replace(partial, self.target_directory)
+            except OSError as error:
+                raise ModelInstallError(
+                    f"Could not activate the verified model: {error}"
+                ) from error
+        except BaseException:
+            self._remove_partial_without_masking_error(partial)
+            raise
         notify(100, "Model verified")
         return self.target_directory
+
+    def _remove_abandoned_partials(self) -> None:
+        prefix = f"{self.manifest.model_id}-"
+        try:
+            candidates = tuple(self.downloads_root.iterdir())
+        except OSError as error:
+            raise ModelInstallError(
+                f"Could not inspect incomplete model downloads: {error}"
+            ) from error
+        for candidate in candidates:
+            if candidate.name.startswith(prefix) and candidate.name.endswith(".partial"):
+                try:
+                    self._remove_partial(candidate)
+                except OSError as error:
+                    raise ModelInstallError(
+                        f"Could not remove incomplete model download: {error}"
+                    ) from error
+
+    def _remove_partial_without_masking_error(self, partial: Path) -> None:
+        # The operation's original error is more useful than a cleanup failure.
+        with suppress(OSError):
+            self._remove_partial(partial)
+
+    def _remove_partial(self, partial: Path) -> None:
+        downloads_root = self.downloads_root.resolve()
+        resolved = partial.resolve()
+        if resolved.parent != downloads_root:
+            raise OSError(f"Refusing to remove a path outside {downloads_root}")
+        if partial.is_symlink() or partial.is_file():
+            partial.unlink(missing_ok=True)
+        elif partial.exists():
+            shutil.rmtree(partial)
 
 
 def _snapshot_download(

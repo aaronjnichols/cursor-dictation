@@ -58,14 +58,15 @@ class QtClipboard:
         payload.setData(self._OWNER_FORMAT, QByteArray(owner_token))
         self._clipboard.setMimeData(payload, QClipboard.Mode.Clipboard)
 
-        if not send_paste():
-            return False
-
-        self._wait_for_target()
-        current = self._clipboard.mimeData(QClipboard.Mode.Clipboard)
-        if current is not None and current.data(self._OWNER_FORMAT).data() == owner_token:
-            self._clipboard.setMimeData(snapshot.to_mime_data(), QClipboard.Mode.Clipboard)
-        return True
+        try:
+            pasted = send_paste()
+            if pasted:
+                self._wait_for_target()
+            return pasted
+        finally:
+            current = self._clipboard.mimeData(QClipboard.Mode.Clipboard)
+            if current is not None and current.data(self._OWNER_FORMAT).data() == owner_token:
+                self._clipboard.setMimeData(snapshot.to_mime_data(), QClipboard.Mode.Clipboard)
 
     def _wait_for_target(self) -> None:
         if self._restore_delay_ms <= 0:

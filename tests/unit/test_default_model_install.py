@@ -124,7 +124,7 @@ def test_hash_failure_never_creates_selectable_model(tmp_path: Path) -> None:
         installer.install()
 
     assert not (tmp_path / "models" / "small.en").exists()
-    assert list((tmp_path / "downloads").glob("*.partial"))
+    assert list((tmp_path / "downloads").glob("*.partial")) == []
 
 
 def test_invalid_existing_model_is_never_replaced(tmp_path: Path) -> None:
@@ -161,10 +161,10 @@ def test_smoke_load_failure_does_not_activate_download(tmp_path: Path) -> None:
         installer.install()
 
     assert not (tmp_path / "models" / "small.en").exists()
-    assert list((tmp_path / "downloads").glob("*.partial"))
+    assert list((tmp_path / "downloads").glob("*.partial")) == []
 
 
-def test_cancel_after_download_leaves_only_partial_data(tmp_path: Path) -> None:
+def test_cancel_after_download_removes_partial_data(tmp_path: Path) -> None:
     files = {"config.json": b"{}", "model.bin": b"model", "tokenizer.json": b"{}"}
     installer = DefaultModelInstaller(
         manifest=manifest_for(files),
@@ -179,4 +179,31 @@ def test_cancel_after_download_leaves_only_partial_data(tmp_path: Path) -> None:
         installer.install(cancel_requested=lambda: next(checks))
 
     assert not (tmp_path / "models" / "small.en").exists()
-    assert list((tmp_path / "downloads").glob("*.partial"))
+    assert list((tmp_path / "downloads").glob("*.partial")) == []
+
+
+def test_retry_does_not_accumulate_abandoned_partial_directories(tmp_path: Path) -> None:
+    expected = {"config.json": b"{}", "model.bin": b"model", "tokenizer.json": b"{}"}
+    attempts = 0
+
+    def download(**kwargs: object) -> str:
+        nonlocal attempts
+        attempts += 1
+        files = expected if attempts == 2 else expected | {"model.bin": b"tampered"}
+        return make_downloader(files, {})(**kwargs)
+
+    installer = DefaultModelInstaller(
+        manifest=manifest_for(expected),
+        models_root=tmp_path / "models",
+        downloads_root=tmp_path / "downloads",
+        snapshot_download=download,
+        smoke_load=lambda _path: None,
+    )
+
+    with pytest.raises(ModelInstallError, match="verification"):
+        installer.install()
+    installed = installer.install()
+
+    assert attempts == 2
+    assert installed.is_dir()
+    assert list((tmp_path / "downloads").glob("*.partial")) == []

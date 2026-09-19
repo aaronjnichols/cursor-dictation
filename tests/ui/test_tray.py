@@ -14,6 +14,7 @@ def test_tray_emits_each_user_command(qtbot) -> None:  # type: ignore[no-untyped
     tray.set_state(AppState.RECORDING)
     with qtbot.waitSignal(tray.cancel_requested):
         tray.cancel_action.trigger()
+    tray.set_state(AppState.IDLE)
     with qtbot.waitSignal(tray.settings_requested):
         tray.settings_action.trigger()
     with qtbot.waitSignal(tray.quit_requested):
@@ -33,6 +34,7 @@ def test_tray_actions_follow_application_state() -> None:
     assert tray.start_action.text() == "Stop dictation"
     assert not tray.copy_action.isEnabled()
     assert tray.cancel_action.isEnabled()
+    assert not tray.settings_action.isEnabled()
 
     tray.set_recording_mode(DeliveryMode.COPY)
     assert not tray.start_action.isEnabled()
@@ -43,3 +45,15 @@ def test_tray_actions_follow_application_state() -> None:
     assert not tray.start_action.isEnabled()
     assert not tray.copy_action.isEnabled()
     assert not tray.cancel_action.isEnabled()
+    assert not tray.settings_action.isEnabled()
+
+    tray.set_state(AppState.ERROR_WITH_TRANSCRIPT)
+    assert not tray.start_action.isEnabled()
+    assert tray.copy_action.isEnabled()
+    assert tray.copy_action.text() == "Copy recovered text"
+    assert tray.cancel_action.isEnabled()
+    assert tray.cancel_action.text() == "Discard recovered text"
+
+    tray.set_state(AppState.ERROR)
+    assert tray.start_action.isEnabled()
+    assert tray.copy_action.isEnabled()

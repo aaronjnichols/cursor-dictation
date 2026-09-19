@@ -4,7 +4,7 @@ from cursor_dictation.settings.history import (
     HistoryRecord,
     JsonlHistoryStore,
 )
-from cursor_dictation.settings.schema import CURRENT_SCHEMA_VERSION, AppSettings
+from cursor_dictation.settings.schema import CURRENT_SCHEMA_VERSION, AppSettings, ModelSource
 from cursor_dictation.settings.store import (
     JsonSettingsStore,
     SettingsLoadError,
@@ -30,6 +30,7 @@ __all__ = [
     "HistoryRecord",
     "JsonSettingsStore",
     "JsonlHistoryStore",
+    "ModelSource",
     "SettingsLoadError",
     "SettingsSaveError",
     "VocabularyError",

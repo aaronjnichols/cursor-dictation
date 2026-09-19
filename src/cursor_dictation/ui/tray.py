@@ -53,13 +53,30 @@ class TrayIcon(QSystemTrayIcon):
         self._state = state
         idle = state is AppState.IDLE
         recording = state is AppState.RECORDING
+        simple_error = state is AppState.ERROR
+        transcript_recovery = state is AppState.ERROR_WITH_TRANSCRIPT
         insert_recording = recording and self._recording_mode is DeliveryMode.INSERT
         copy_recording = recording and self._recording_mode is DeliveryMode.COPY
         self.start_action.setText("Stop dictation" if insert_recording else "Start dictation")
-        self.copy_action.setText("Stop and copy" if copy_recording else "Record and copy")
-        self.start_action.setEnabled(idle or insert_recording)
-        self.copy_action.setEnabled(idle or copy_recording)
-        self.cancel_action.setEnabled(recording)
+        if transcript_recovery:
+            self.copy_action.setText("Copy recovered text")
+        else:
+            self.copy_action.setText("Stop and copy" if copy_recording else "Record and copy")
+        self.cancel_action.setText(
+            "Discard recovered text" if transcript_recovery else "Cancel dictation"
+        )
+        self.start_action.setEnabled(idle or insert_recording or simple_error)
+        self.copy_action.setEnabled(idle or copy_recording or simple_error or transcript_recovery)
+        self.cancel_action.setEnabled(recording or transcript_recovery)
+        self.settings_action.setEnabled(
+            state
+            in {
+                AppState.IDLE,
+                AppState.FIRST_RUN_SETUP,
+                AppState.SETTINGS_OPEN,
+                AppState.ERROR,
+            }
+        )
         label = {
             AppState.RECORDING: "Recording",
             AppState.TRANSCRIBING: "Transcribing locally",

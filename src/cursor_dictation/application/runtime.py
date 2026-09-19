@@ -90,6 +90,8 @@ class DictationRuntime(QObject):
             return
         if self._hold_active:
             return
+        if self._controller.state is AppState.ERROR:
+            self._controller.reset_error()
         if self._controller.state is not AppState.IDLE:
             self._overlay.show_busy()
             return
@@ -107,10 +109,19 @@ class DictationRuntime(QObject):
         self._toggle(DeliveryMode.INSERT)
 
     def _toggle_copy(self) -> None:
+        if self._controller.state is AppState.ERROR_WITH_TRANSCRIPT:
+            if self._controller.copy_recoverable_transcript():
+                self._overlay.show_copied()
+            else:
+                self._overlay.show_error(self._controller.last_error or "Clipboard copy failed")
+            return
         self._toggle(DeliveryMode.COPY)
 
     def _toggle(self, mode: DeliveryMode) -> None:
         state = self._controller.state
+        if state is AppState.ERROR:
+            self._controller.reset_error()
+            state = self._controller.state
         if state is AppState.IDLE:
             if not self._can_start():
                 return
@@ -124,6 +135,9 @@ class DictationRuntime(QObject):
 
     def _cancel(self) -> None:
         self._hold_active = False
+        if self._controller.state is AppState.ERROR_WITH_TRANSCRIPT:
+            self._controller.discard_recoverable_transcript()
+            return
         self._controller.cancel()
 
     def _state_changed(self, state: AppState) -> None:

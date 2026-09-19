@@ -291,6 +291,25 @@ def test_recovery_copy_exception_keeps_transcript_available() -> None:
     assert controller.last_error == "clipboard locked"
 
 
+def test_recoverable_transcript_can_be_explicitly_discarded() -> None:
+    controller, _, queue, delivery = make_controller()
+
+    delivery.insert_at_cursor = lambda text: DeliveryResult.failed(  # type: ignore[method-assign]
+        DeliveryMethod.CLIPBOARD_PASTE,
+        error_code="paste_failed",
+        recoverable=True,
+    )
+    controller.start_recording(DeliveryMode.INSERT)
+    controller.stop_recording()
+    queue.succeed("Discard this transcript.")
+
+    assert controller.discard_recoverable_transcript()
+    assert controller.state is AppState.IDLE
+    assert controller.last_transcript is None
+    assert controller.last_error is None
+    assert controller.start_recording(DeliveryMode.COPY)
+
+
 def test_successful_delivery_is_added_to_enabled_history() -> None:
     history = FakeHistory()
     controller, _, queue, _ = make_controller(history=history)

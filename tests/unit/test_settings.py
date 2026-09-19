@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from cursor_dictation.settings.schema import CURRENT_SCHEMA_VERSION, AppSettings
+from cursor_dictation.settings.schema import CURRENT_SCHEMA_VERSION, AppSettings, ModelSource
 from cursor_dictation.settings.store import JsonSettingsStore, SettingsLoadError, SettingsSaveError
 
 
@@ -21,6 +21,7 @@ def test_settings_defaults_match_the_approved_controls() -> None:
     assert settings.cancel_hotkey == "Ctrl+Alt+Escape"
     assert settings.microphone_device_id is None
     assert settings.model_path is None
+    assert settings.model_source is ModelSource.RECOMMENDED
     assert settings.sound_cues_enabled is True
     assert settings.history_enabled is False
     assert settings.launch_at_sign_in is False
@@ -39,6 +40,7 @@ def test_settings_are_frozen() -> None:
         ({"hold_to_talk_hotkey": "  "}, "hold_to_talk_hotkey"),
         ({"toggle_recording_hotkey": "Ctrl+Alt+Space"}, "distinct"),
         ({"model_path": ""}, "model_path"),
+        ({"model_source": "custom"}, "model_source"),
         ({"microphone_device_id": "\n"}, "microphone_device_id"),
         ({"history_enabled": 1}, "history_enabled"),
         ({"schema_version": 0}, "schema_version"),
@@ -77,6 +79,25 @@ def test_settings_round_trip_as_inspectable_json(tmp_path: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == CURRENT_SCHEMA_VERSION
     assert payload["model_path"] == settings.model_path
+    assert payload["model_source"] == "recommended"
+
+
+def test_version_one_path_migrates_to_safe_recommended_provenance(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "model_path": r"C:\models\custom",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = JsonSettingsStore(path).load()
+
+    assert settings.model_source is ModelSource.RECOMMENDED
+    assert json.loads(path.read_text(encoding="utf-8"))["model_source"] == "recommended"
 
 
 def test_save_replaces_the_old_file_only_after_complete_json_exists(

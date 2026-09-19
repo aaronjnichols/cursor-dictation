@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from threading import Event, RLock
 from typing import Protocol, cast
@@ -128,6 +129,7 @@ class SoundDeviceRecorder:
     def list_devices(self) -> tuple[AudioDevice, ...]:
         devices = self._query_devices()
         host_api_names = self._query_host_api_names()
+        device_ids = _stable_device_ids(devices, host_api_names=host_api_names)
         default_index = self._default_input_index(devices)
         found: list[AudioDevice] = []
         for index, item in enumerate(devices):
@@ -136,7 +138,7 @@ class SoundDeviceRecorder:
                 continue
             found.append(
                 AudioDevice(
-                    id=_stable_device_id(item, index=index, host_api_names=host_api_names),
+                    id=device_ids[index],
                     name=str(item.get("name", f"Input device {index}")),
                     max_input_channels=channels,
                     default_sample_rate=_float_value(item.get("default_samplerate")),
@@ -152,21 +154,14 @@ class SoundDeviceRecorder:
 
         devices = self._query_devices()
         host_api_names = self._query_host_api_names()
+        device_ids = _stable_device_ids(devices, host_api_names=host_api_names)
         input_indexes = {
-            _stable_device_id(item, index=index, host_api_names=host_api_names): index
+            device_ids[index]: index
             for index, item in enumerate(devices)
             if _integer_value(item.get("max_input_channels"), default=0) > 0
         }
         default_index = self._default_input_index(devices)
-        default_id = (
-            _stable_device_id(
-                devices[default_index],
-                index=default_index,
-                host_api_names=host_api_names,
-            )
-            if default_index is not None
-            else None
-        )
+        default_id = device_ids[default_index] if default_index is not None else None
         requested_exists = device_id is not None and device_id in input_indexes
 
         if requested_exists:
@@ -393,6 +388,32 @@ def _stable_device_id(
     host_api = host_api_names.get(host_api_index, f"hostapi-{host_api_index}")
     name = str(device.get("name", f"Input device {index}"))
     return f"{host_api}:{name}"
+
+
+def _stable_device_ids(
+    devices: Sequence[Mapping[str, object]],
+    *,
+    host_api_names: Mapping[int, str],
+) -> dict[int, str]:
+    base_ids = {
+        index: _stable_device_id(
+            device,
+            index=index,
+            host_api_names=host_api_names,
+        )
+        for index, device in enumerate(devices)
+        if _integer_value(device.get("max_input_channels"), default=0) > 0
+    }
+    counts = Counter(base_ids.values())
+    ordinals: Counter[str] = Counter()
+    unique: dict[int, str] = {}
+    for index, base_id in base_ids.items():
+        if counts[base_id] == 1:
+            unique[index] = base_id
+            continue
+        ordinals[base_id] += 1
+        unique[index] = f"{base_id} [{ordinals[base_id]}]"
+    return unique
 
 
 def _stream_is_active(stream: _InputStream) -> bool:

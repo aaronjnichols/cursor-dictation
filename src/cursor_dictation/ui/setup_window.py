@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import cast
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -23,6 +24,7 @@ from cursor_dictation.ui.icons import make_app_icon
 class SetupWindow(QDialog):
     install_requested = Signal()
     cancel_requested = Signal()
+    dismiss_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -30,6 +32,7 @@ class SetupWindow(QDialog):
         self.setWindowIcon(make_app_icon())
         self.setModal(False)
         self.resize(610, 430)
+        self._application_close = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(26, 24, 26, 22)
@@ -80,7 +83,6 @@ class SetupWindow(QDialog):
         buttons.addStretch(1)
         cancel_button = QPushButton("Cancel")
         cancel_button.clicked.connect(self.cancel_requested.emit)
-        cancel_button.clicked.connect(self.close)
         self.install_button = QPushButton("Download and continue")
         self.install_button.setObjectName("primaryButton")
         self.install_button.clicked.connect(self.install_requested.emit)
@@ -142,6 +144,21 @@ class SetupWindow(QDialog):
         self.progress_label.setText("Model verified")
         self.install_button.setText("Finish")
         self.install_button.setEnabled(True)
+
+    def close_for_application(self) -> None:
+        self._application_close = True
+        try:
+            self.close()
+        finally:
+            self._application_close = False
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._application_close:
+            self._application_close = False
+            super().closeEvent(event)
+            return
+        event.ignore()
+        self.dismiss_requested.emit()
 
     def _choose_location(self) -> None:
         directory = QFileDialog.getExistingDirectory(

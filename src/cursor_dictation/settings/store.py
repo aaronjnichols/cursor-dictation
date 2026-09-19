@@ -41,7 +41,20 @@ def _migrate_version_0_to_1(values: dict[str, object]) -> dict[str, object]:
     return migrated
 
 
-SETTINGS_MIGRATIONS: Mapping[int, SettingsMigration] = {0: _migrate_version_0_to_1}
+def _migrate_version_1_to_2(values: dict[str, object]) -> dict[str, object]:
+    migrated = dict(values)
+    # Version 1 did not preserve provenance. Treat every legacy path as the pinned
+    # model until the user explicitly reselects it as custom. This can reject a
+    # legacy custom directory, but it cannot silently weaken hash verification.
+    migrated["model_source"] = "recommended"
+    migrated["schema_version"] = 2
+    return migrated
+
+
+SETTINGS_MIGRATIONS: Mapping[int, SettingsMigration] = {
+    0: _migrate_version_0_to_1,
+    1: _migrate_version_1_to_2,
+}
 
 
 def migrate_settings_data(values: Mapping[str, object]) -> tuple[dict[str, object], bool]:

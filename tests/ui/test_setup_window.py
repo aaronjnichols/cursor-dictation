@@ -53,3 +53,14 @@ def test_setup_binds_install_location_and_microphone_choice(qtbot, tmp_path: Pat
     assert window.install_root == tmp_path
     assert window.selected_microphone_id == "wasapi:usb"
     assert window.microphone.currentText() == "USB microphone"
+
+
+def test_title_bar_close_requests_setup_dismissal(qtbot) -> None:  # type: ignore[no-untyped-def]
+    window = SetupWindow()
+    qtbot.addWidget(window)
+    window.show()
+
+    with qtbot.waitSignal(window.dismiss_requested):
+        window.close()
+
+    assert window.isVisible()

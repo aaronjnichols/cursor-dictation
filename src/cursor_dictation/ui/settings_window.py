@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -15,6 +16,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QProgressBar,
     QPushButton,
@@ -25,7 +27,8 @@ from PySide6.QtWidgets import (
 )
 
 from cursor_dictation.audio.recorder import AudioDevice
-from cursor_dictation.settings.schema import AppSettings
+from cursor_dictation.settings.history import HistoryRecord
+from cursor_dictation.settings.schema import AppSettings, ModelSource
 from cursor_dictation.settings.vocabulary import parse_vocabulary
 from cursor_dictation.ui.icons import make_app_icon
 
@@ -34,6 +37,8 @@ class SettingsWindow(QMainWindow):
     save_requested = Signal()
     close_requested = Signal()
     clear_history_requested = Signal()
+    copy_history_requested = Signal(str)
+    microphone_test_requested = Signal()
 
     page_names = (
         "General",
@@ -47,6 +52,8 @@ class SettingsWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._model_source = ModelSource.RECOMMENDED
+        self._editing_enabled = True
         self.setWindowTitle("Cursor Dictation settings")
         self.setWindowIcon(make_app_icon())
         self.resize(760, 540)
@@ -78,12 +85,12 @@ class SettingsWindow(QMainWindow):
         self.status_label.setObjectName("settingsStatus")
         footer.addWidget(self.status_label)
         footer.addStretch(1)
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(self.close)
+        self.close_button = QPushButton("Close")
+        self.close_button.clicked.connect(self.close)
         self.save_button = QPushButton("Save")
         self.save_button.setObjectName("primaryButton")
         self.save_button.clicked.connect(self.save_requested.emit)
-        footer.addWidget(close_button)
+        footer.addWidget(self.close_button)
         footer.addWidget(self.save_button)
         root_layout.addLayout(footer)
 
@@ -91,6 +98,9 @@ class SettingsWindow(QMainWindow):
         self.setCentralWidget(root)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._editing_enabled:
+            event.ignore()
+            return
         self.close_requested.emit()
         super().closeEvent(event)
 
@@ -109,6 +119,7 @@ class SettingsWindow(QMainWindow):
         self.history_enabled.setChecked(settings.history_enabled)
         self.launch_at_sign_in.setChecked(settings.launch_at_sign_in)
         self.model_path.setText(settings.model_path or "")
+        self._model_source = settings.model_source
         self.vocabulary_editor.setPlainText("\n".join(vocabulary))
 
         self.microphone.clear()
@@ -132,6 +143,7 @@ class SettingsWindow(QMainWindow):
             cancel_hotkey=self.cancel_hotkey.text().strip(),
             microphone_device_id=device_id,
             model_path=model_path,
+            model_source=self._model_source,
             sound_cues_enabled=self.sound_cues.isChecked(),
             history_enabled=self.history_enabled.isChecked(),
             launch_at_sign_in=self.launch_at_sign_in.isChecked(),
@@ -149,6 +161,51 @@ class SettingsWindow(QMainWindow):
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
+    def set_editing_enabled(self, enabled: bool) -> None:
+        self._editing_enabled = enabled
+        self.navigation.setEnabled(enabled)
+        self.stack.setEnabled(enabled)
+        self.save_button.setEnabled(enabled)
+        self.close_button.setEnabled(enabled)
+
+    @property
+    def selected_microphone_id(self) -> str | None:
+        value = self.microphone.currentData()
+        return cast(str, value) if value is not None else None
+
+    def set_microphone_test_active(self, active: bool) -> None:
+        self.test_microphone_button.setText("Stop test" if active else "Test microphone")
+        self.microphone.setEnabled(not active)
+        if not active:
+            self.input_level.setValue(0)
+
+    def set_input_level(self, level: float) -> None:
+        self.input_level.setValue(round(max(0.0, min(1.0, level)) * 100))
+
+    @property
+    def history_record_count(self) -> int:
+        return self.history_list.count()
+
+    def apply_history(self, records: tuple[HistoryRecord, ...]) -> None:
+        self.history_list.clear()
+        for record in reversed(records):
+            timestamp = record.timestamp.astimezone().strftime("%b %d, %Y %I:%M %p")
+            preview = " ".join(record.text.splitlines())
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            item = QListWidgetItem(f"{timestamp} · {record.delivery_mode.value}\n{preview}")
+            item.setData(Qt.ItemDataRole.UserRole, record.copy_text)
+            self.history_list.addItem(item)
+        self.copy_history_button.setEnabled(self.history_list.count() > 0)
+
+    def _copy_selected_history(self) -> None:
+        selected = self.history_list.selectedItems()
+        if not selected:
+            return
+        text = selected[0].data(Qt.ItemDataRole.UserRole)
+        if isinstance(text, str):
+            self.copy_history_requested.emit(text)
+
     def _choose_model(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self,
@@ -156,10 +213,15 @@ class SettingsWindow(QMainWindow):
             self.model_path.text(),
         )
         if directory:
-            self.model_path.setText(directory)
+            self.set_custom_model_path(Path(directory))
+
+    def set_custom_model_path(self, path: Path) -> None:
+        self.model_path.setText(str(path))
+        self._model_source = ModelSource.CUSTOM
 
     def _use_default_model(self) -> None:
         self.model_path.clear()
+        self._model_source = ModelSource.RECOMMENDED
 
     def _add_pages(self) -> None:
         self.launch_at_sign_in = QCheckBox("Launch Cursor Dictation when I sign in")
@@ -188,6 +250,7 @@ class SettingsWindow(QMainWindow):
         self.microphone = QComboBox()
         self.microphone.addItem("Windows default", None)
         self.test_microphone_button = QPushButton("Test microphone")
+        self.test_microphone_button.clicked.connect(self.microphone_test_requested.emit)
         self.input_level = QProgressBar()
         self.input_level.setRange(0, 100)
         audio_form = QFormLayout()
@@ -230,13 +293,23 @@ class SettingsWindow(QMainWindow):
         )
 
         self.history_enabled = QCheckBox("Keep local transcript history")
+        self.history_list = QListWidget()
+        self.history_list.setMinimumHeight(150)
+        self.copy_history_button = QPushButton("Copy selected transcript")
+        self.copy_history_button.setEnabled(False)
+        self.copy_history_button.clicked.connect(self._copy_selected_history)
         self.clear_history_button = QPushButton("Clear history")
         self.clear_history_button.clicked.connect(self.clear_history_requested.emit)
         self.stack.addWidget(
             self._page(
                 "History",
                 "History is off by default and never contains audio or target-window details.",
-                (self.history_enabled, self.clear_history_button),
+                (
+                    self.history_enabled,
+                    self.history_list,
+                    self.copy_history_button,
+                    self.clear_history_button,
+                ),
             )
         )
 

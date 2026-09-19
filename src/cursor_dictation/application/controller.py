@@ -164,6 +164,16 @@ class DictationController:
         self._move(Event.RESET)
         return True
 
+    def discard_recoverable_transcript(self) -> bool:
+        if self._state is not AppState.ERROR_WITH_TRANSCRIPT:
+            return False
+        self._active_session = None
+        self._delivery_mode = None
+        self.last_error = None
+        self.last_transcript = None
+        self._move(Event.RESET)
+        return True
+
     def _transcription_succeeded(self, session_id: str, transcript: Transcript) -> None:
         if session_id != self._active_session or self._state is not AppState.TRANSCRIBING:
             return
