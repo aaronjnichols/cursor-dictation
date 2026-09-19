@@ -95,7 +95,17 @@ analysis = Analysis(
     runtime_hooks=[
         str(project_root / "packaging/runtime_hooks/faster_whisper_numpy_audio.py"),
     ],
-    excludes=["av"],
+    excludes=[
+        "av",
+        "fsspec.conftest",
+        "pytest",
+        "_pytest",
+        "pluggy",
+        "iniconfig",
+        "pygments",
+        "setuptools",
+        "_distutils_hack",
+    ],
     noarchive=False,
     optimize=0,
 )

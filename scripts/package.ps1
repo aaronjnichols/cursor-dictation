@@ -14,6 +14,26 @@ $executable = Join-Path $bundle "Cursor Dictation.exe"
 if (-not (Test-Path -LiteralPath $executable)) {
     throw "Packaged executable was not created: $executable"
 }
+$archiveListing = uv run pyi-archive_viewer -r -l $executable 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect the packaged executable's embedded Python archive."
+}
+$forbiddenArchiveModules = @(
+    "fsspec.conftest",
+    "pytest",
+    "_pytest",
+    "pluggy",
+    "iniconfig",
+    "pygments",
+    "setuptools",
+    "_distutils_hack"
+)
+foreach ($forbiddenModule in $forbiddenArchiveModules) {
+    $escapedModule = [regex]::Escape($forbiddenModule)
+    if ($archiveListing -match "(?m)'$escapedModule(?:\.|')") {
+        throw "The executable archive contains an excluded test/build module: $forbiddenModule"
+    }
+}
 $bundleRoot = (Resolve-Path -LiteralPath $bundle).Path
 $bundleLicenseRoot = Join-Path $bundle "_internal\licenses"
 New-Item -ItemType Directory -Path $bundleLicenseRoot -Force | Out-Null
@@ -56,9 +76,13 @@ try {
     if (Test-Path -LiteralPath (Join-Path $smokeData "models\small.en")) {
         throw "Packaged smoke test unexpectedly downloaded a model."
     }
-    foreach ($forbiddenDirectory in @("_internal\av", "_internal\av.libs")) {
+    foreach ($forbiddenDirectory in @(
+        "_internal\av",
+        "_internal\av.libs",
+        "_internal\setuptools"
+    )) {
         if (Test-Path -LiteralPath (Join-Path $smokeBundle $forbiddenDirectory)) {
-            throw "The package contains the unused PyAV/FFmpeg runtime: $forbiddenDirectory"
+            throw "The package contains an excluded runtime directory: $forbiddenDirectory"
         }
     }
     $forbiddenRuntimeFiles = @(
@@ -93,6 +117,7 @@ try {
         "licenses\Qt-GPL-3.0-only.txt",
         "licenses\PyInstaller-COPYING.txt",
         "licenses\Intel-Simplified-Software-License.txt",
+        "licenses\PortAudio-LICENSE.txt",
         "licenses\BUNDLE-NATIVE-INVENTORY.txt",
         "licenses\onnxruntime\LICENSE",
         "licenses\onnxruntime\ThirdPartyNotices.txt"

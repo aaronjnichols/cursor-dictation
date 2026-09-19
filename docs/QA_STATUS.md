@@ -4,7 +4,7 @@ Status recorded September 19, 2026 on the current Windows development machine.
 
 ## Passed
 
-- 264 deterministic tests pass. Four opt-in live tests remain deselected by the normal gate.
+- 265 deterministic tests pass. Four opt-in live tests remain deselected by the normal gate.
 - Ruff formatting and lint pass.
 - Strict mypy passes for all 49 source files.
 - The lockfile resolves 52 packages without drift.
@@ -14,6 +14,8 @@ Status recorded September 19, 2026 on the current Windows development machine.
 - The package contains one x64 non-ASIO PortAudio DLL and no PyAV, FFmpeg, cuDNN, foreign-architecture
   PortAudio, ASIO, or unrelated developer-runtime DLLs.
 - The package contains the native inventory and checked license files for the frozen runtime.
+- The executable archive excludes pytest, build-only packaging modules, and their transitive
+  dependencies; package verification inspects the archive on every clean build.
 - Native global shortcut registration and release passed in the available Windows session.
 - Unit and integration coverage includes state transitions, hotkey conflicts, hold ownership,
   capture limits, native-rate resampling, model transactions, offline-only engine arguments,

@@ -1,8 +1,8 @@
 # Third-party notices
 
 Cursor Dictation is proprietary internal software. The components below retain their own
-licenses. Versions match `uv.lock` as of September 19, 2026. Full license and third-party
-notice files are copied into the packaged application's `_internal\licenses` directory.
+licenses. Versions match `uv.lock` as of September 19, 2026. The release's collected license
+files and notices are copied into the packaged application's `_internal\licenses` directory.
 
 ## Speech recognition and model delivery
 
@@ -26,7 +26,8 @@ SHA-256 values in `assets/models/default-small-en.json` before activation.
 | --- | ---: | --- | --- |
 | PySide6, PySide6 Essentials, PySide6 Addons, Shiboken6 | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | <https://code.qt.io/cgit/pyside/pyside-setup.git/> |
 | Qt libraries distributed by PySide6 | 6.11.2 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only | <https://www.qt.io/licensing/open-source-lgpl-obligations> |
-| sounddevice and PortAudio binaries | 0.5.6 | MIT | <https://github.com/spatialaudio/python-sounddevice> |
+| sounddevice | 0.5.6 | MIT | <https://github.com/spatialaudio/python-sounddevice> |
+| PortAudio | 19.7.0 | MIT | <https://github.com/PortAudio/portaudio/tree/v19.7.0> |
 | Python-SoXR and libsoxr | 1.1.0 / 0.1.3 | LGPL-2.1-or-later | <https://github.com/dofuuz/python-soxr> |
 | PFFFT, included in the SoXR extension | bundled with SoXR 1.1.0 | BSD-like | <https://bitbucket.org/jpommier/pffft/> |
 | pywin32 | 312 | PSF | <https://github.com/mhammond/pywin32> |
@@ -43,6 +44,10 @@ PyAV, FFmpeg, video codecs, and their native libraries. The package also exclude
 for macOS, 32-bit Windows, ARM64 Windows, and ASIO. It retains only the 64-bit non-ASIO PortAudio
 DLL used by this application.
 
+The sounddevice wheel's checked-in build workflow pins its PortAudio binaries to the upstream
+`v19.7.0` tag. The package includes PortAudio's own copyright and MIT permission text as
+`PortAudio-LICENSE.txt`.
+
 ## Embedded language and Windows runtimes
 
 | Component | Version | License | Source |
@@ -57,9 +62,10 @@ The packaged `licenses` directory contains the complete CPython license and CPyt
 third-party license document. Those files include the applicable OpenSSL, libffi, and
 Microsoft Windows binary-build terms. SQLite's source and binaries are dedicated to the
 public domain. Build verification rejects native DLLs accidentally discovered in unrelated
-developer-tool directories. Component-specific files cover CTranslate2, tokenizers,
-FlatBuffers, Qt/PySide6, PyInstaller, ONNX Runtime, and ONNX Runtime's bundled native
-dependencies. Wheel-supplied license files are retained beside their distribution metadata.
+developer-tool directories. Checked-in component-specific files cover CTranslate2, tokenizers,
+FlatBuffers, Qt/PySide6 licensing options, PyInstaller, Intel OpenMP, and PortAudio. ONNX Runtime
+and its bundled dependencies retain their upstream notices. Wheel-supplied license files are
+retained beside their distribution metadata.
 The package writes `_internal/licenses/BUNDLE-NATIVE-INVENTORY.txt` during each build. Release
 verification rejects the unused PyAV/FFmpeg tree and checks the required CTranslate2, Intel OpenMP,
 SoXR, PortAudio, Qt, ONNX Runtime, and tokenizers native files.
