@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import cast
 
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QCloseEvent
@@ -22,6 +23,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cursor_dictation.audio.recorder import AudioDevice
+from cursor_dictation.settings.schema import AppSettings
+from cursor_dictation.settings.vocabulary import parse_vocabulary
 from cursor_dictation.ui.icons import make_app_icon
 
 
@@ -84,6 +88,51 @@ class SettingsWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         self.close_requested.emit()
         super().closeEvent(event)
+
+    def apply_settings(
+        self,
+        settings: AppSettings,
+        *,
+        vocabulary: tuple[str, ...],
+        devices: tuple[AudioDevice, ...],
+    ) -> None:
+        self.hold_hotkey.setText(settings.hold_to_talk_hotkey)
+        self.toggle_hotkey.setText(settings.toggle_recording_hotkey)
+        self.copy_hotkey.setText(settings.record_and_copy_hotkey)
+        self.cancel_hotkey.setText(settings.cancel_hotkey)
+        self.sound_cues.setChecked(settings.sound_cues_enabled)
+        self.history_enabled.setChecked(settings.history_enabled)
+        self.launch_at_sign_in.setChecked(settings.launch_at_sign_in)
+        self.model_path.setText(settings.model_path or "")
+        self.vocabulary_editor.setPlainText("\n".join(vocabulary))
+
+        self.microphone.clear()
+        self.microphone.addItem("Windows default", None)
+        selected_index = 0
+        for device in devices:
+            label = f"{device.name} (default)" if device.is_default else device.name
+            self.microphone.addItem(label, device.id)
+            if device.id == settings.microphone_device_id:
+                selected_index = self.microphone.count() - 1
+        self.microphone.setCurrentIndex(selected_index)
+
+    def collect_settings(self) -> tuple[AppSettings, tuple[str, ...]]:
+        raw_device_id = self.microphone.currentData()
+        device_id = cast(str | None, raw_device_id) if raw_device_id is not None else None
+        model_path = self.model_path.text().strip() or None
+        settings = AppSettings(
+            hold_to_talk_hotkey=self.hold_hotkey.text().strip(),
+            toggle_recording_hotkey=self.toggle_hotkey.text().strip(),
+            record_and_copy_hotkey=self.copy_hotkey.text().strip(),
+            cancel_hotkey=self.cancel_hotkey.text().strip(),
+            microphone_device_id=device_id,
+            model_path=model_path,
+            sound_cues_enabled=self.sound_cues.isChecked(),
+            history_enabled=self.history_enabled.isChecked(),
+            launch_at_sign_in=self.launch_at_sign_in.isChecked(),
+        )
+        vocabulary = parse_vocabulary(self.vocabulary_editor.toPlainText())
+        return settings, vocabulary
 
     def _add_pages(self) -> None:
         self.launch_at_sign_in = QCheckBox("Launch Cursor Dictation when I sign in")
