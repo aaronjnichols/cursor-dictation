@@ -2,17 +2,28 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 from cursor_dictation.core.models import RecordedAudio
-from cursor_dictation.transcription.engine import ModelInfo, TranscriptionEngine
+from cursor_dictation.transcription.engine import (
+    EmptyTranscriptError,
+    ModelInfo,
+    TranscriptionEngine,
+)
 
 _CUSTOM_MODEL_FILES = ("model.bin", "config.json", "tokenizer.json")
 
 
 class CustomModelValidationError(ValueError):
     """A custom model failed structural, load, or smoke validation."""
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedModel:
+    engine: TranscriptionEngine
+    info: ModelInfo
 
 
 class ModelManager:
@@ -30,23 +41,37 @@ class ModelManager:
         return self._active_model
 
     def activate_custom(self, path: Path, *, smoke_audio: RecordedAudio) -> ModelInfo:
+        prepared = self.prepare_custom(path, smoke_audio=smoke_audio)
+        self.activate(prepared)
+        return prepared.info
+
+    def prepare_custom(self, path: Path, *, smoke_audio: RecordedAudio) -> PreparedModel:
         resolved = path.resolve()
         _validate_custom_structure(resolved)
+        prepared = self._prepare(resolved, label="Custom model")
 
         try:
-            candidate = self._engine_factory()
-            info = candidate.load(resolved)
-        except Exception as error:
-            raise CustomModelValidationError(f"Custom model load failed: {error}") from error
-
-        try:
-            candidate.transcribe(smoke_audio, language="en", vocabulary=())
+            prepared.engine.transcribe(smoke_audio, language="en", vocabulary=())
+        except EmptyTranscriptError:
+            pass
         except Exception as error:
             raise CustomModelValidationError(f"Custom model smoke test failed: {error}") from error
+        return prepared
 
-        self._active_engine = candidate
-        self._active_model = info
-        return info
+    def prepare_verified(self, path: Path) -> PreparedModel:
+        return self._prepare(path.resolve(), label="Verified model")
+
+    def activate(self, prepared: PreparedModel) -> None:
+        self._active_engine = prepared.engine
+        self._active_model = prepared.info
+
+    def _prepare(self, path: Path, *, label: str) -> PreparedModel:
+        try:
+            candidate = self._engine_factory()
+            info = candidate.load(path)
+        except Exception as error:
+            raise CustomModelValidationError(f"{label} load failed: {error}") from error
+        return PreparedModel(engine=candidate, info=info)
 
 
 def _validate_custom_structure(path: Path) -> None:

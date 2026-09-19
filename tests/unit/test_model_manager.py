@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cursor_dictation.core.models import RecordedAudio, Transcript
-from cursor_dictation.transcription.engine import ModelInfo
+from cursor_dictation.transcription.engine import EmptyTranscriptError, ModelInfo
 from cursor_dictation.transcription.model_manager import (
     CustomModelValidationError,
     ModelManager,
@@ -65,6 +65,50 @@ def test_valid_custom_model_becomes_active_only_after_smoke_test(tmp_path: Path)
     assert manager.active_engine is candidate
     assert manager.active_model == info
     assert candidate.smoke_calls == 1
+
+
+def test_prepared_model_does_not_replace_active_model_until_committed(tmp_path: Path) -> None:
+    first_path = tmp_path / "first"
+    next_path = tmp_path / "next"
+    _write_custom_model(first_path)
+    _write_custom_model(next_path)
+    first = FakeEngine()
+    next_engine = FakeEngine()
+    engines = iter((first, next_engine))
+    manager = ModelManager(engine_factory=lambda: next(engines))
+    manager.activate_custom(first_path, smoke_audio=_smoke_audio())
+
+    prepared = manager.prepare_custom(next_path, smoke_audio=_smoke_audio())
+
+    assert manager.active_engine is first
+    manager.activate(prepared)
+    assert manager.active_engine is next_engine
+    assert manager.active_model == prepared.info
+
+
+def test_empty_transcript_is_an_acceptable_custom_model_smoke_result(tmp_path: Path) -> None:
+    model_path = tmp_path / "valid"
+    _write_custom_model(model_path)
+    candidate = FakeEngine(smoke_error=EmptyTranscriptError("silence"))
+    manager = ModelManager(engine_factory=lambda: candidate)
+
+    info = manager.activate_custom(model_path, smoke_audio=_smoke_audio())
+
+    assert info.path == model_path.resolve()
+    assert manager.active_engine is candidate
+
+
+def test_verified_model_can_be_prepared_without_running_inference(tmp_path: Path) -> None:
+    model_path = tmp_path / "verified"
+    _write_custom_model(model_path)
+    candidate = FakeEngine(smoke_error=RuntimeError("must not transcribe"))
+    manager = ModelManager(engine_factory=lambda: candidate)
+
+    prepared = manager.prepare_verified(model_path)
+    manager.activate(prepared)
+
+    assert candidate.smoke_calls == 0
+    assert manager.active_model == prepared.info
 
 
 def test_failed_candidate_does_not_replace_active_model(tmp_path: Path) -> None:
