@@ -192,7 +192,7 @@ def test_runtime_updates_recording_waveform_from_microphone_level(qtbot) -> None
 
     runtime.poll_audio_completion()
 
-    assert max(overlay.audio_block_heights) == 7
+    assert max(overlay.audio_block_heights) == 14
     runtime.close()
 
 

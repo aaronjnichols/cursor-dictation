@@ -76,8 +76,8 @@ def test_recording_waveform_reflects_input_level(qtbot) -> None:  # type: ignore
 
     overlay.set_input_level(1.0)
 
-    assert len(overlay.audio_block_heights) == 12
-    assert max(overlay.audio_block_heights) == 7
+    assert len(overlay.audio_block_heights) == 24
+    assert max(overlay.audio_block_heights) == 14
     assert "█" in overlay.waveform_text
 
 
@@ -92,8 +92,9 @@ def test_overlay_uses_compact_half_scale_geometry(qtbot) -> None:  # type: ignor
     assert 44 <= overlay.height() <= 52
 
 
-def test_transcription_uses_an_indeterminate_segmented_activity_bar(qtbot) -> None:  # type: ignore[no-untyped-def]
+def test_transcription_uses_scattered_indeterminate_activity(qtbot) -> None:  # type: ignore[no-untyped-def]
     overlay = StatusOverlay()
+    overlay._random.seed(17)
     qtbot.addWidget(overlay)
     overlay.set_state(AppState.TRANSCRIBING)
 
@@ -101,6 +102,9 @@ def test_transcription_uses_an_indeterminate_segmented_activity_bar(qtbot) -> No
     overlay._advance_activity()  # type: ignore[attr-defined]
 
     assert overlay.progress_active_cells != initial
+    assert initial < overlay.progress_active_cells
+    assert len({x for x, _ in initial}) > 8
+    assert len({y for _, y in initial}) > 8
     assert overlay.detail_text == "LOCAL MODEL"
     assert "%" not in overlay.detail_text
 
@@ -141,9 +145,9 @@ def test_inserted_feedback_builds_selected_pixel_check_grid(qtbot) -> None:  # t
     assert overlay.status_text == "INSERTED"
     assert overlay.detail_text == "42 WORDS"
     assert overlay.visual_mode == "check"
-    assert overlay.completion_grid_size == (12, 7)
+    assert overlay.completion_grid_size == (24, 14)
     assert overlay.completion_green_cells == frozenset(
-        (column + 2, row)
+        ((column + 2) * 2 + dx, row * 2 + dy + 1)
         for column, row in {
             (5, 0),
             (6, 0),
@@ -160,4 +164,6 @@ def test_inserted_feedback_builds_selected_pixel_check_grid(qtbot) -> None:  # t
             (3, 4),
             (2, 5),
         }
+        for dx in range(2)
+        for dy in range(2)
     )

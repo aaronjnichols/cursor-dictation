@@ -18,6 +18,7 @@ def test_settings_window_round_trips_user_editable_values(qtbot) -> None:  # typ
         sound_cues_enabled=False,
         history_enabled=True,
         launch_at_sign_in=True,
+        overlay_palette="chamber",
     )
     devices = (
         AudioDevice(

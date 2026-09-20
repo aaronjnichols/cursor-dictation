@@ -25,6 +25,7 @@ def test_settings_defaults_match_the_approved_controls() -> None:
     assert settings.sound_cues_enabled is True
     assert settings.history_enabled is False
     assert settings.launch_at_sign_in is False
+    assert settings.overlay_palette == "warm_white"
 
 
 def test_settings_are_frozen() -> None:
@@ -43,6 +44,7 @@ def test_settings_are_frozen() -> None:
         ({"model_source": "custom"}, "model_source"),
         ({"microphone_device_id": "\n"}, "microphone_device_id"),
         ({"history_enabled": 1}, "history_enabled"),
+        ({"overlay_palette": "unknown"}, "overlay_palette"),
         ({"schema_version": 0}, "schema_version"),
         ({"hold_to_talk_hotkey": "not a shortcut"}, "hold_to_talk_hotkey"),
         ({"toggle_recording_hotkey": "Alt+Ctrl+Space"}, "distinct"),

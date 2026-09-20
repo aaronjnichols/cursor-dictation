@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from math import sqrt
+from random import Random
 
-from PySide6.QtCore import QElapsedTimer, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QApplication,
@@ -84,9 +85,9 @@ class _BlockGrid(QWidget):
         columns: int,
         rows: int,
         *,
-        cell_width: int,
-        cell_height: int,
-        gap: int,
+        cell_width: float,
+        cell_height: float,
+        gap: float,
     ) -> None:
         super().__init__()
         self.setObjectName("overlayVisual")
@@ -96,6 +97,7 @@ class _BlockGrid(QWidget):
         self._cell_width = cell_width
         self._cell_height = cell_height
         self._gap = gap
+        self.palette_name = "warm_white"
         self._orange_cells: frozenset[tuple[int, int]] = frozenset()
         self._green_cells: frozenset[tuple[int, int]] = frozenset()
         self.setFixedSize(self.sizeHint())
@@ -125,25 +127,30 @@ class _BlockGrid(QWidget):
     def sizeHint(self) -> QSize:
         width = self._columns * self._cell_width + (self._columns - 1) * self._gap
         height = self._rows * self._cell_height + (self._rows - 1) * self._gap
-        return QSize(width, height)
+        return QSize(int(width), int(height))
 
     def paintEvent(self, event: QPaintEvent) -> None:
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setPen(Qt.PenStyle.NoPen)
+        pitch_x = (self.width() + self._gap) / self._columns
+        pitch_y = (self.height() + self._gap) / self._rows
         for row in range(self._rows):
             for column in range(self._columns):
                 cell = (column, row)
                 if cell in self._green_cells:
-                    color = COLORS.success
+                    color = COLORS.success if self.palette_name == "chamber" else "#DEDAD0"
                 elif cell in self._orange_cells:
-                    color = COLORS.primary
+                    color = COLORS.primary if self.palette_name == "chamber" else "#DEDAD0"
                 else:
-                    color = COLORS.inactive
-                x = column * (self._cell_width + self._gap)
-                y = row * (self._cell_height + self._gap)
-                painter.fillRect(x, y, self._cell_width, self._cell_height, QColor(color))
+                    color = COLORS.border
+                painter.fillRect(
+                    QRectF(
+                        column * pitch_x, row * pitch_y, pitch_x - self._gap, pitch_y - self._gap
+                    ),
+                    QColor(color),
+                )
 
 
 def _visual_host(widget: QWidget) -> QWidget:
@@ -172,8 +179,11 @@ class StatusOverlay(QWidget):
         self._status_text = "Ready"
         self._visual_mode = "none"
         self._audio_phase = 0
-        self._audio_block_heights: tuple[int, ...] = (0,) * 12
+        self._audio_block_heights: tuple[int, ...] = (0,) * 24
         self._activity_phase = 0
+        self._activity_order = [(x, y) for y in range(14) for x in range(24)]
+        self._random = Random()
+        self._random.shuffle(self._activity_order)
         self._check_step = 0
         self._elapsed = QElapsedTimer()
 
@@ -192,11 +202,11 @@ class StatusOverlay(QWidget):
         self._state_code = "[--]"
 
         self._audio_grid = _BlockGrid(
-            12,
-            7,
-            cell_width=3,
-            cell_height=3,
-            gap=1,
+            24,
+            14,
+            cell_width=1.5,
+            cell_height=1.5,
+            gap=0.5,
         )
         self._progress_grid = self._audio_grid
         self._check_grid = self._audio_grid
@@ -250,6 +260,12 @@ class StatusOverlay(QWidget):
     def status_text(self) -> str:
         return self._status_text
 
+    def set_palette(self, palette: str) -> None:
+        if palette not in {"warm_white", "chamber"}:
+            raise ValueError("Unknown overlay palette")
+        self._audio_grid.palette_name = palette
+        self._audio_grid.update()
+
     @property
     def detail_text(self) -> str:
         return self._detail_label.text()
@@ -296,10 +312,15 @@ class StatusOverlay(QWidget):
         )
         profile = profiles[self._audio_phase % len(profiles)]
         self._audio_phase += 1
-        heights = tuple(max(0, min(7, round(strength * 7 * weight))) for weight in profile)
+        dense_profile = tuple(
+            weight
+            for index, value in enumerate(profile)
+            for weight in (value, (value + profile[min(index + 1, 11)]) / 2)
+        )
+        heights = tuple(max(0, min(14, round(strength * 14 * weight))) for weight in dense_profile)
         self._audio_block_heights = heights
         active = frozenset(
-            (column, row) for column, height in enumerate(heights) for row in range(7 - height, 7)
+            (column, row) for column, height in enumerate(heights) for row in range(14 - height, 14)
         )
         if self._visual_mode in {"audio", "none"}:
             self._audio_grid.set_cells(orange=active)
@@ -462,15 +483,14 @@ class StatusOverlay(QWidget):
         self._visual_stack.setCurrentIndex(self._visual_indexes[visual])
 
     def _advance_activity(self) -> None:
-        columns, rows = self._progress_grid.grid_size
-        width = 2
-        active = frozenset(
-            ((self._activity_phase + offset) % columns, row)
-            for offset in range(width)
-            for row in range(rows)
-        )
+        # Fill and recede through a shuffled field; this is activity, not progress.
+        phase = self._activity_phase % 40
+        if phase == 0:
+            self._random.shuffle(self._activity_order)
+        density = 0.12 + 0.56 * (1 - abs(phase - 20) / 20)
+        active = frozenset(self._activity_order[: round(len(self._activity_order) * density)])
         self._progress_grid.set_cells(orange=active)
-        self._activity_phase = (self._activity_phase + 1) % columns
+        self._activity_phase = (self._activity_phase + 1) % 40
 
     def _advance_completion_animation(self) -> None:
         if self._check_step >= len(_CHECK_SEQUENCE):
@@ -479,7 +499,10 @@ class StatusOverlay(QWidget):
         self._check_step += 1
         self._check_grid.set_cells(
             green=frozenset(
-                (column + 2, row) for column, row in _CHECK_SEQUENCE[: self._check_step]
+                ((column + 2) * 2 + dx, row * 2 + dy + 1)
+                for column, row in _CHECK_SEQUENCE[: self._check_step]
+                for dx in range(2)
+                for dy in range(2)
             )
         )
 
@@ -487,7 +510,12 @@ class StatusOverlay(QWidget):
         self._check_timer.stop()
         self._check_step = len(_CHECK_SEQUENCE)
         self._check_grid.set_cells(
-            green=frozenset((column + 2, row) for column, row in _CHECK_CELLS)
+            green=frozenset(
+                ((column + 2) * 2 + dx, row * 2 + dy + 1)
+                for column, row in _CHECK_CELLS
+                for dx in range(2)
+                for dy in range(2)
+            )
         )
 
     def _dismiss_feedback(self) -> None:

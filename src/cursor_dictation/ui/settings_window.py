@@ -119,6 +119,9 @@ class SettingsWindow(QMainWindow):
         self.sound_cues.setChecked(settings.sound_cues_enabled)
         self.history_enabled.setChecked(settings.history_enabled)
         self.launch_at_sign_in.setChecked(settings.launch_at_sign_in)
+        self.overlay_palette.setCurrentIndex(
+            self.overlay_palette.findData(settings.overlay_palette)
+        )
         self.model_path.setText(settings.model_path or "")
         self._model_source = settings.model_source
         self.vocabulary_editor.setPlainText("\n".join(vocabulary))
@@ -148,6 +151,7 @@ class SettingsWindow(QMainWindow):
             sound_cues_enabled=self.sound_cues.isChecked(),
             history_enabled=self.history_enabled.isChecked(),
             launch_at_sign_in=self.launch_at_sign_in.isChecked(),
+            overlay_palette=str(self.overlay_palette.currentData()),
         )
         vocabulary = parse_vocabulary(self.vocabulary_editor.toPlainText())
         return settings, vocabulary
@@ -230,11 +234,16 @@ class SettingsWindow(QMainWindow):
     def _add_pages(self) -> None:
         self.launch_at_sign_in = QCheckBox("Launch Cursor Dictation when I sign in")
         self.sound_cues = QCheckBox("Play recording and completion sounds")
+        self.overlay_palette = QComboBox()
+        self.overlay_palette.addItem("Warm White", "warm_white")
+        self.overlay_palette.addItem("Chamber", "chamber")
+        appearance_form = QFormLayout()
+        appearance_form.addRow("Dictation grid palette", self.overlay_palette)
         self.stack.addWidget(
             self._page(
                 "General",
                 "Cursor Dictation runs in the Windows notification area.",
-                (self.launch_at_sign_in, self.sound_cues),
+                (self.launch_at_sign_in, self.sound_cues, appearance_form),
             )
         )
 

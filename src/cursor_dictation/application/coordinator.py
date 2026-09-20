@@ -155,6 +155,7 @@ class ApplicationCoordinator:
         self.tray.show()
         try:
             self._settings = self._settings_store.load()
+            self.overlay.set_palette(self._settings.overlay_palette)
             self._vocabulary = self._vocabulary_store.load()
         except Exception as error:
             self._show_configuration_error(error)
@@ -638,6 +639,7 @@ class ApplicationCoordinator:
             return False
 
         self._settings = settings
+        self.overlay.set_palette(settings.overlay_palette)
         self._vocabulary = vocabulary
         self._history.enabled = settings.history_enabled
         startup_error = self._sync_startup()

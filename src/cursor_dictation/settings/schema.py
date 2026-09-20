@@ -37,8 +37,11 @@ class AppSettings:
     sound_cues_enabled: bool = True
     history_enabled: bool = False
     launch_at_sign_in: bool = False
+    overlay_palette: str = "warm_white"
 
     def __post_init__(self) -> None:
+        if self.overlay_palette not in {"warm_white", "chamber"}:
+            raise ValueError("overlay_palette must be warm_white or chamber")
         if type(self.schema_version) is not int:
             raise TypeError("schema_version must be an integer")
         if self.schema_version != CURRENT_SCHEMA_VERSION:
@@ -85,6 +88,7 @@ class AppSettings:
             "sound_cues_enabled": self.sound_cues_enabled,
             "history_enabled": self.history_enabled,
             "launch_at_sign_in": self.launch_at_sign_in,
+            "overlay_palette": self.overlay_palette,
         }
 
     @classmethod
@@ -109,6 +113,7 @@ class AppSettings:
             sound_cues_enabled=_boolean_value(combined, "sound_cues_enabled"),
             history_enabled=_boolean_value(combined, "history_enabled"),
             launch_at_sign_in=_boolean_value(combined, "launch_at_sign_in"),
+            overlay_palette=_string_value(combined, "overlay_palette"),
         )
 
 
