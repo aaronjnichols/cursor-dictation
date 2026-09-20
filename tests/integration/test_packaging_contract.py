@@ -33,6 +33,8 @@ def test_pyinstaller_contract_removes_unrelated_build_host_dlls() -> None:
     assert '"codex-runtimes" in source_parts' in specification
     assert '"av.libs" in source_parts' in specification
     assert '"msvcp140.dll"' in specification
+    assert '"libcrypto-3-x64.dll"' in specification
+    assert '"libssl-3-x64.dll"' in specification
     assert '"libcrypto-3-x64.dll"' in package_script
     assert '"libssl-3-x64.dll"' in package_script
 

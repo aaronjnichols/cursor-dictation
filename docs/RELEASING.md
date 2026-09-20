@@ -15,6 +15,9 @@ package version, and application version must match.
    git push origin vMAJOR.MINOR.PATCH
    ```
 
+Never move or reuse a tag after pushing it. If a tagged build fails, fix the issue and increment the
+patch version.
+
 The release workflow repeats the full deterministic gate, builds the one-folder Windows package,
 runs the packaged smoke test, and publishes a ZIP plus its SHA-256 checksum to GitHub Releases.
 The default Whisper model is downloaded and verified on first run; it is not included in the ZIP.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cursor-dictation"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local Windows speech-to-text that delivers text at the active cursor."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"

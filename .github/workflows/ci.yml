@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  UV_LINK_MODE: copy
+
 jobs:
   verify:
     runs-on: windows-latest

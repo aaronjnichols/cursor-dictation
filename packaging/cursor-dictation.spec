@@ -118,12 +118,14 @@ excluded_runtime_files = {
     "cudnn64_9.dll",
     "icudt78.dll",
     "icuuc.dll",
+    "libcrypto-3-x64.dll",
     "libportaudio.dylib",
     "libportaudio32bit.dll",
     "libportaudio32bit-asio.dll",
     "libportaudio64bit-asio.dll",
     "libportaudioarm64.dll",
     "libportaudioarm64-asio.dll",
+    "libssl-3-x64.dll",
 }
 
 
