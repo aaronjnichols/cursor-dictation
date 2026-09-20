@@ -155,11 +155,16 @@ class DictationRuntime(QObject):
         if state in {AppState.ERROR, AppState.ERROR_WITH_TRANSCRIPT}:
             self._overlay.show_error(self._controller.last_error or "Dictation failed")
 
-    def _completed(self, mode: DeliveryMode, result: DeliveryResult) -> None:
+    def _completed(
+        self,
+        mode: DeliveryMode,
+        result: DeliveryResult,
+        word_count: int,
+    ) -> None:
         if mode is DeliveryMode.COPY or result.method.value == "clipboard_copy":
-            self._overlay.show_copied()
+            self._overlay.show_copied(word_count=word_count)
         else:
-            self._overlay.show_inserted()
+            self._overlay.show_inserted(word_count=word_count)
 
     def _can_start(self) -> bool:
         if self._enabled:

@@ -4,7 +4,7 @@ Status recorded September 19, 2026 on the current Windows development machine.
 
 ## Passed
 
-- 265 deterministic tests pass. Four opt-in live tests remain deselected by the normal gate.
+- 270 deterministic tests pass. Four opt-in live tests remain deselected by the normal gate.
 - Ruff formatting and lint pass.
 - Strict mypy passes for all 49 source files.
 - The lockfile resolves 52 packages without drift.

@@ -5,14 +5,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ThemeColors:
-    background: str = "#151313"
-    raised: str = "#211E1D"
-    popover: str = "#2B2725"
-    foreground: str = "#CECDC3"
-    muted: str = "#9F9A92"
-    primary: str = "#EDB449"
-    border: str = "#49413F"
-    success: str = "#78A978"
+    background: str = "#120F0E"
+    raised: str = "#171615"
+    popover: str = "#171615"
+    active: str = "#25170E"
+    foreground: str = "#C9C5BA"
+    muted: str = "#898682"
+    inactive: str = "#484643"
+    primary: str = "#DA7C47"
+    border: str = "#302D2B"
+    success: str = "#76AD4F"
     danger: str = "#D87872"
 
 
@@ -28,6 +30,10 @@ def build_stylesheet() -> str:
     }}
     QWidget {{
         background-color: {COLORS.background};
+    }}
+    QWidget#statusOverlay, QWidget#overlayPanel, QWidget#overlayVisual,
+    QWidget#overlayVisualHost, QStackedWidget#overlayVisualStack {{
+        background-color: transparent;
     }}
     QMainWindow, QDialog {{
         background-color: {COLORS.background};
@@ -60,6 +66,38 @@ def build_stylesheet() -> str:
         color: {COLORS.primary};
         font-size: 15px;
         font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
+    }}
+    QLabel#overlayCode, QLabel#overlayStatus, QLabel#overlayDetail,
+    QLabel#overlayFooter, QLabel#overlaySymbol {{
+        background-color: transparent;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+    }}
+    QLabel#overlayCode {{
+        color: {COLORS.primary};
+        font-size: 9px;
+        font-weight: 600;
+    }}
+    QLabel#overlayStatus {{
+        color: {COLORS.foreground};
+        font-size: 10px;
+        font-weight: 400;
+    }}
+    QLabel#overlayDetail {{
+        color: {COLORS.muted};
+        font-size: 10px;
+    }}
+    QLabel#overlayFooter {{
+        color: {COLORS.muted};
+        font-size: 8px;
+    }}
+    QLabel#overlaySymbol {{
+        color: {COLORS.danger};
+        font-size: 16px;
+        font-weight: 700;
+    }}
+    QFrame#overlayDivider, QFrame#overlayFooterDivider {{
+        background-color: {COLORS.border};
+        border: none;
     }}
     QPushButton {{
         min-height: 30px;

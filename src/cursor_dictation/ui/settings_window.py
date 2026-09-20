@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cursor_dictation import __version__
 from cursor_dictation.audio.recorder import AudioDevice
 from cursor_dictation.settings.history import HistoryRecord
 from cursor_dictation.settings.schema import AppSettings, ModelSource
@@ -316,7 +317,7 @@ class SettingsWindow(QMainWindow):
             )
         )
 
-        version = QLabel("Version 0.1.0")
+        version = QLabel(f"Version {__version__}")
         version.setObjectName("muted")
         self.stack.addWidget(
             self._page(

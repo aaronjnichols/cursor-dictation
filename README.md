@@ -4,14 +4,18 @@ Cursor Dictation is a Windows tray app for local speech-to-text. It records into
 transcribes with a local Whisper model, and either inserts the final text at the active cursor or
 copies it to the clipboard.
 
-## Use the packaged app
+## Download and use
 
-1. Extract the whole `Cursor Dictation` folder. The executable needs the adjacent `_internal`
+Download the Windows ZIP from the
+[latest GitHub release](https://github.com/aaronjnichols/cursor-dictation/releases/latest), then:
+
+1. Verify the ZIP against the accompanying `.sha256` file.
+2. Extract the whole `Cursor Dictation` folder. The executable needs the adjacent `_internal`
    folder.
-2. Run `Cursor Dictation.exe`.
-3. On first run, install the recommended `small.en` model and choose a microphone. The verified
+3. Run `Cursor Dictation.exe`.
+4. On first run, install the recommended `small.en` model and choose a microphone. The verified
    download is about 486 MB.
-4. Leave the app in the system tray and dictate with a shortcut.
+5. Leave the app in the system tray and dictate with a shortcut.
 
 The default shortcuts are:
 
@@ -53,5 +57,6 @@ Build and smoke-test the unsigned, one-folder Windows distribution with:
 .\scripts\package.ps1
 ```
 
-This is an internal test build. Windows may show a SmartScreen warning because the executable is
-not code-signed.
+Release builds are currently unsigned. Windows may show a SmartScreen warning.
+
+Release instructions are in [docs/RELEASING.md](docs/RELEASING.md).

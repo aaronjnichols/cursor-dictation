@@ -34,7 +34,7 @@ class DictationController:
         session_ids: Callable[[], str],
         observer_error: Callable[[Exception], None] | None = None,
         history: TranscriptHistory | None = None,
-        completion_listener: Callable[[DeliveryMode, DeliveryResult], None] | None = None,
+        completion_listener: Callable[[DeliveryMode, DeliveryResult, int], None] | None = None,
         initial_state: AppState = AppState.IDLE,
     ) -> None:
         self._recorder = recorder
@@ -45,7 +45,7 @@ class DictationController:
         self._session_ids = session_ids
         self._observer_error = observer_error
         self._history = history
-        self._completion_listeners: list[Callable[[DeliveryMode, DeliveryResult], None]] = []
+        self._completion_listeners: list[Callable[[DeliveryMode, DeliveryResult, int], None]] = []
         if completion_listener is not None:
             self._completion_listeners.append(completion_listener)
         self._state = initial_state
@@ -64,7 +64,7 @@ class DictationController:
 
     def add_completion_listener(
         self,
-        listener: Callable[[DeliveryMode, DeliveryResult], None],
+        listener: Callable[[DeliveryMode, DeliveryResult, int], None],
     ) -> None:
         self._completion_listeners.append(listener)
 
@@ -213,7 +213,7 @@ class DictationController:
                 self._report_observer_error(error)
         for listener in tuple(self._completion_listeners):
             try:
-                listener(mode, result)
+                listener(mode, result, len(text.split()))
             except Exception as error:
                 self._report_observer_error(error)
 

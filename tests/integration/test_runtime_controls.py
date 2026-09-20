@@ -164,6 +164,26 @@ def test_audio_limit_completion_stops_and_transcribes(qtbot) -> None:  # type: i
     runtime.close()
 
 
+def test_successful_insert_shows_pixel_completion_with_word_count(qtbot) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, _, queue, hotkeys, _, overlay = make_runtime(qtbot)
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    hotkeys.toggle_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
+    request = queue.requests[-1]
+
+    controller._transcription_succeeded(  # type: ignore[attr-defined]
+        request.session_id,
+        Transcript("Three words inserted."),
+    )
+
+    assert controller.state is AppState.IDLE
+    assert overlay.status_text == "INSERTED"
+    assert overlay.detail_text == "3 WORDS"
+    assert overlay.visual_mode == "check"
+    runtime.close()
+
+
 def test_runtime_updates_recording_waveform_from_microphone_level(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
     hotkeys.toggle_pressed.emit()
@@ -172,7 +192,7 @@ def test_runtime_updates_recording_waveform_from_microphone_level(qtbot) -> None
 
     runtime.poll_audio_completion()
 
-    assert "█" in overlay.waveform_text
+    assert max(overlay.audio_block_heights) == 7
     runtime.close()
 
 
@@ -185,13 +205,13 @@ def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type:
     assert controller.state is AppState.TRANSCRIBING
 
     hotkeys.copy_pressed.emit()
-    qtbot.waitUntil(lambda: overlay.status_text == "Transcribing...")
+    qtbot.waitUntil(lambda: overlay.status_text == "WORKING")
 
     assert recorder.starts == 1
-    assert overlay.status_text == "Transcribing..."
+    assert overlay.status_text == "WORKING"
     qtbot.wait(1_700)
     assert overlay.isVisible()
-    assert overlay.status_text == "Transcribing locally..."
+    assert overlay.status_text == "TRANSCRIBING"
     runtime.close()
 
 
@@ -228,7 +248,7 @@ def test_tray_copy_recovers_transcript_after_delivery_failure(qtbot) -> None:  #
 
     assert delivery.copied == ["Keep this transcript."]
     assert controller.state is AppState.IDLE
-    assert overlay.status_text == "Copied"
+    assert overlay.status_text == "COPIED"
     runtime.close()
 
 

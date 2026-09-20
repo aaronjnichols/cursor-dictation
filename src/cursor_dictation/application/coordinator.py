@@ -821,7 +821,13 @@ class ApplicationCoordinator:
                 self.overlay.show_error("Selected microphone unavailable; using Windows default")
                 self._log_warning("microphone_default_fallback")
 
-    def _completion_feedback(self, mode: DeliveryMode, result: DeliveryResult) -> None:
+    def _completion_feedback(
+        self,
+        mode: DeliveryMode,
+        result: DeliveryResult,
+        word_count: int,
+    ) -> None:
+        del mode, result, word_count
         if self._settings.sound_cues_enabled:
             QApplication.beep()
 

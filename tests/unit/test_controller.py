@@ -86,7 +86,7 @@ def make_controller(
     vocabulary: Callable[[], Sequence[str]] | None = None,
     observer_error: Callable[[Exception], None] | None = None,
     history: FakeHistory | None = None,
-    completion_listener: Callable[[DeliveryMode, DeliveryResult], None] | None = None,
+    completion_listener: Callable[[DeliveryMode, DeliveryResult, int], None] | None = None,
 ) -> tuple[DictationController, FakeRecorder, FakeTranscriptionQueue, FakeDelivery]:
     recorder = FakeRecorder()
     queue = FakeTranscriptionQueue()
@@ -342,14 +342,14 @@ def test_history_failure_does_not_turn_delivered_text_into_an_app_error() -> Non
     assert [str(error) for error in observer_errors] == ["history unavailable"]
 
 
-def test_completion_listener_receives_mode_and_delivery_method() -> None:
-    completions: list[tuple[DeliveryMode, DeliveryResult]] = []
+def test_completion_listener_receives_mode_delivery_method_and_word_count() -> None:
+    completions: list[tuple[DeliveryMode, DeliveryResult, int]] = []
     controller, _, queue, _ = make_controller(
         completion_listener=lambda *value: completions.append(value)
     )
     controller.start_recording(DeliveryMode.COPY)
     controller.stop_recording()
 
-    queue.succeed("Copied.")
+    queue.succeed("Copied words here.")
 
-    assert completions == [(DeliveryMode.COPY, DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY))]
+    assert completions == [(DeliveryMode.COPY, DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY), 3)]
