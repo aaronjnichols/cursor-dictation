@@ -22,7 +22,7 @@ def main() -> None:
     app = QApplication([])
     app.setStyleSheet(build_stylesheet())
     for palette, title in (("warm_white", "Warm White"), ("chamber", "Chamber")):
-        sheet = QImage(780, 620, QImage.Format.Format_ARGB32)
+        sheet = QImage(780, 780, QImage.Format.Format_ARGB32)
         sheet.fill(QColor(COLORS.background))
         painter = QPainter(sheet)
         painter.setPen(QColor(COLORS.foreground))
@@ -59,6 +59,19 @@ def main() -> None:
                 Qt.TransformationMode.FastTransformation,
             )
             painter.drawImage(42, 110 + index * 160, enlarged)
+        overlay.show_error("The recording did not produce any text")
+        overlay._dismiss_timer.stop()
+        app.processEvents()
+        capture = overlay.grab().toImage()
+        capture.setDevicePixelRatio(1)
+        capture.save(str(args.output / f"{palette}-error.png"))
+        enlarged = capture.scaled(
+            690,
+            144,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        painter.drawImage(42, 590, enlarged)
         overlay.close()
         painter.end()
         sheet.save(str(args.output / f"{palette}-states.png"))

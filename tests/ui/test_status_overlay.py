@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint
-from PySide6.QtWidgets import QWidget
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtWidgets import QPushButton, QWidget
 
 from cursor_dictation.core.models import AppState
 from cursor_dictation.ui.status_overlay import StatusOverlay
@@ -45,10 +45,11 @@ def test_overlay_can_show_busy_copy_and_error_feedback(qtbot) -> None:  # type: 
     assert overlay.visual_mode == "check"
 
     overlay.show_error("Microphone unavailable")
-    assert overlay.status_text == "Microphone unavailable"
+    assert overlay.status_text == "MICROPHONE UNAVAILABLE"
+    assert overlay.detail_text == "TRY AGAIN"
 
 
-def test_unresolved_error_feedback_does_not_auto_dismiss(qtbot) -> None:  # type: ignore[no-untyped-def]
+def test_error_feedback_dismisses_without_clearing_recovery_state(qtbot) -> None:  # type: ignore[no-untyped-def]
     overlay = StatusOverlay()
     qtbot.addWidget(overlay)
     overlay.set_state(AppState.ERROR_WITH_TRANSCRIPT)
@@ -56,8 +57,28 @@ def test_unresolved_error_feedback_does_not_auto_dismiss(qtbot) -> None:  # type
     overlay.show_error("Copy or discard the transcript")
     overlay._dismiss_feedback()  # type: ignore[attr-defined]
 
-    assert overlay.isVisible()
-    assert overlay.status_text == "Copy or discard the transcript"
+    assert not overlay.isVisible()
+    assert not overlay.is_active
+
+
+def test_empty_transcript_error_has_compact_copy_and_close_button(qtbot) -> None:  # type: ignore[no-untyped-def]
+    overlay = StatusOverlay()
+    overlay.setStyleSheet(build_stylesheet())
+    qtbot.addWidget(overlay)
+
+    overlay.show_error("The recording did not produce any text")
+
+    assert overlay.status_text == "NO SPEECH DETECTED"
+    assert overlay.detail_text == "TRY AGAIN"
+    assert overlay._dismiss_timer.isActive()  # type: ignore[attr-defined]
+    assert overlay._dismiss_timer.interval() == 5000  # type: ignore[attr-defined]
+    dismiss = overlay.findChild(QPushButton, "overlayDismiss")
+    assert dismiss is not None
+    assert dismiss.isVisible()
+
+    qtbot.mouseClick(dismiss, Qt.MouseButton.LeftButton)
+    assert not overlay.isVisible()
+    assert not overlay.is_active
 
 
 def test_recording_warns_with_one_minute_left(qtbot) -> None:  # type: ignore[no-untyped-def]

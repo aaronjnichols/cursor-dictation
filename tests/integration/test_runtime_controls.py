@@ -220,11 +220,11 @@ def test_disabled_runtime_rejects_hotkeys_while_settings_are_open(qtbot) -> None
     runtime.set_enabled(False)
 
     hotkeys.toggle_pressed.emit()
-    qtbot.waitUntil(lambda: overlay.status_text == "Close Settings to start dictation")
+    qtbot.waitUntil(lambda: overlay.status_text == "SETTINGS ARE OPEN")
 
     assert controller.state is AppState.IDLE
     assert recorder.starts == 0
-    assert overlay.status_text == "Close Settings to start dictation"
+    assert overlay.status_text == "SETTINGS ARE OPEN"
     runtime.close()
 
 

@@ -95,6 +95,27 @@ def build_stylesheet() -> str:
         font-size: 16px;
         font-weight: 700;
     }}
+    QPushButton#overlayDismiss {{
+        min-width: 24px;
+        max-width: 24px;
+        min-height: 24px;
+        max-height: 24px;
+        padding: 0;
+        color: {COLORS.muted};
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: 0;
+        font-family: "Cascadia Mono", "Consolas", monospace;
+        font-size: 16px;
+    }}
+    QPushButton#overlayDismiss:hover {{
+        color: {COLORS.foreground};
+        border-color: {COLORS.border};
+    }}
+    QPushButton#overlayDismiss:pressed {{
+        color: {COLORS.background};
+        background-color: {COLORS.foreground};
+    }}
     QFrame#overlayDivider, QFrame#overlayFooterDivider {{
         background-color: {COLORS.border};
         border: none;

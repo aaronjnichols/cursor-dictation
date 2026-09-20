@@ -439,9 +439,8 @@ def test_missing_pinned_microphone_notifies_user_and_logs_once(
     hotkeys.toggle_pressed.emit()
     qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
 
-    assert coordinator.overlay.status_text == (
-        "Selected microphone unavailable; using Windows default"
-    )
+    assert coordinator.overlay.status_text == "MICROPHONE UNAVAILABLE"
+    assert coordinator.overlay.detail_text == "USING WINDOWS DEFAULT"
     assert warnings == ["microphone_default_fallback"]
 
     hotkeys.cancel_pressed.emit()

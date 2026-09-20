@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLayout,
+    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -210,9 +211,14 @@ class StatusOverlay(QWidget):
         )
         self._progress_grid = self._audio_grid
         self._check_grid = self._audio_grid
-        self._symbol_label = QLabel("!!")
-        self._symbol_label.setObjectName("overlaySymbol")
-        self._symbol_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._dismiss_button = QPushButton("\N{MULTIPLICATION SIGN}")
+        self._dismiss_button.setObjectName("overlayDismiss")
+        self._dismiss_button.setAccessibleName("Dismiss notification")
+        self._dismiss_button.setToolTip("Dismiss")
+        self._dismiss_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._dismiss_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._dismiss_button.setFixedSize(24, 24)
+        self._dismiss_button.clicked.connect(self._dismiss_error)
 
         self._visual_stack = QStackedWidget()
         self._visual_stack.setObjectName("overlayVisualStack")
@@ -222,7 +228,7 @@ class StatusOverlay(QWidget):
             "audio": grid_index,
             "progress": grid_index,
             "check": grid_index,
-            "message": self._visual_stack.addWidget(_visual_host(self._symbol_label)),
+            "message": self._visual_stack.addWidget(_visual_host(self._dismiss_button)),
         }
 
         copy = QVBoxLayout()
@@ -374,6 +380,7 @@ class StatusOverlay(QWidget):
                 visual="message",
             )
             self._show_without_focus()
+            self._dismiss_timer.start(5000)
             return
         self._active = False
         self._status_text = "Ready"
@@ -393,16 +400,41 @@ class StatusOverlay(QWidget):
         self._elapsed_timer.stop()
         self._activity_timer.stop()
         self._check_timer.stop()
+        status, detail = self._error_copy(message)
         self._set_view(
             code="[ERR]",
-            status=message,
-            detail="ACTION REQUIRED",
+            status=status,
+            detail=detail,
             visual="message",
         )
+        self._status_label.setToolTip(message)
         self._active = True
         self._show_without_focus()
-        if self._state not in {AppState.ERROR, AppState.ERROR_WITH_TRANSCRIPT}:
-            self._dismiss_timer.start(3500)
+        self._dismiss_timer.start(5000)
+
+    @staticmethod
+    def _error_copy(message: str) -> tuple[str, str]:
+        if message == "The recording did not produce any text":
+            return "NO SPEECH DETECTED", "TRY AGAIN"
+        if message == "Close Settings to start dictation":
+            return "SETTINGS ARE OPEN", "CLOSE TO DICTATE"
+        if message == "Selected microphone unavailable; using Windows default":
+            return "MICROPHONE UNAVAILABLE", "USING WINDOWS DEFAULT"
+        compact = " ".join(message.split()).upper()
+        if len(compact) <= 24:
+            return compact, "TRY AGAIN"
+        return "DICTATION FAILED", "OPEN TRAY FOR DETAILS"
+
+    def _dismiss_error(self) -> None:
+        self._dismiss_timer.stop()
+        self._elapsed_timer.stop()
+        self._activity_timer.stop()
+        self._check_timer.stop()
+        self._active = False
+        self._status_text = "Ready"
+        self._status_label.setText("Ready")
+        self._detail_label.clear()
+        self.hide()
 
     def _show_activity_state(
         self,
@@ -520,6 +552,7 @@ class StatusOverlay(QWidget):
 
     def _dismiss_feedback(self) -> None:
         if self._state in {AppState.ERROR, AppState.ERROR_WITH_TRANSCRIPT}:
+            self._dismiss_error()
             return
         if self._state is AppState.RECORDING:
             self.set_state(self._state)
