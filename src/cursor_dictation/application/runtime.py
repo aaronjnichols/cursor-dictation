@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
 
 from PySide6.QtCore import QObject, Qt, QTimer
@@ -24,6 +25,9 @@ class HotkeyPort(Protocol):
     hold_released: _Signal
     toggle_pressed: _Signal
     copy_pressed: _Signal
+    copy_released: _Signal
+    markdown_pressed: _Signal
+    markdown_released: _Signal
     cancel_pressed: _Signal
 
 
@@ -46,23 +50,29 @@ class DictationRuntime(QObject):
         hotkeys: HotkeyPort,
         tray: TrayIcon,
         overlay: StatusOverlay,
+        prepare_recording: Callable[[], bool] | None = None,
     ) -> None:
         super().__init__()
         self._controller = controller
         self._recorder = recorder
         self._tray = tray
         self._overlay = overlay
-        self._hold_active = False
+        self._hold_mode: DeliveryMode | None = None
         self._enabled = True
+        self._prepare_recording = prepare_recording
 
         queued = Qt.ConnectionType.QueuedConnection
         hotkeys.hold_pressed.connect(self._hold_pressed, queued)
         hotkeys.hold_released.connect(self._hold_released, queued)
         hotkeys.toggle_pressed.connect(self._toggle_insert, queued)
-        hotkeys.copy_pressed.connect(self._toggle_copy, queued)
+        hotkeys.copy_pressed.connect(self._copy_pressed, queued)
+        hotkeys.copy_released.connect(self._copy_released, queued)
+        hotkeys.markdown_pressed.connect(self._markdown_pressed, queued)
+        hotkeys.markdown_released.connect(self._markdown_released, queued)
         hotkeys.cancel_pressed.connect(self._cancel, queued)
         tray.start_insert_requested.connect(self._toggle_insert)
         tray.start_copy_requested.connect(self._toggle_copy)
+        tray.start_markdown_requested.connect(self._toggle_markdown)
         tray.cancel_requested.connect(self._cancel)
         controller.add_state_listener(self._state_changed)
         controller.add_completion_listener(self._completed)
@@ -91,26 +101,50 @@ class DictationRuntime(QObject):
             RecordingCompletionReason.CAPTURE_ERROR,
             RecordingCompletionReason.DEVICE_STOPPED,
         }:
-            self._hold_active = False
+            self._hold_mode = None
             self._controller.stop_recording()
 
     def _hold_pressed(self) -> None:
+        self._start_hold(DeliveryMode.INSERT)
+
+    def _copy_pressed(self) -> None:
+        if self._controller.state is AppState.ERROR_WITH_TRANSCRIPT:
+            self._toggle_copy()
+            return
+        self._start_hold(DeliveryMode.COPY)
+
+    def _markdown_pressed(self) -> None:
+        self._start_hold(DeliveryMode.MARKDOWN)
+
+    def _start_hold(self, mode: DeliveryMode) -> None:
         if not self._can_start():
             return
-        if self._hold_active:
+        if self._hold_mode is not None:
             return
         if self._controller.state is AppState.ERROR:
             self._controller.reset_error()
         if self._controller.state is not AppState.IDLE:
             self._overlay.show_busy()
             return
-        self._tray.set_recording_mode(DeliveryMode.INSERT)
-        self._hold_active = self._controller.start_recording(DeliveryMode.INSERT)
+        if self._prepare_recording is not None and not self._prepare_recording():
+            return
+        self._tray.set_recording_mode(mode)
+        if self._controller.start_recording(mode):
+            self._hold_mode = mode
 
     def _hold_released(self) -> None:
-        if not self._hold_active:
+        self._release_hold(DeliveryMode.INSERT)
+
+    def _copy_released(self) -> None:
+        self._release_hold(DeliveryMode.COPY)
+
+    def _markdown_released(self) -> None:
+        self._release_hold(DeliveryMode.MARKDOWN)
+
+    def _release_hold(self, mode: DeliveryMode) -> None:
+        if self._hold_mode is not mode:
             return
-        self._hold_active = False
+        self._hold_mode = None
         if self._controller.state is AppState.RECORDING:
             self._controller.stop_recording()
 
@@ -126,6 +160,9 @@ class DictationRuntime(QObject):
             return
         self._toggle(DeliveryMode.COPY)
 
+    def _toggle_markdown(self) -> None:
+        self._toggle(DeliveryMode.MARKDOWN)
+
     def _toggle(self, mode: DeliveryMode) -> None:
         state = self._controller.state
         if state is AppState.ERROR:
@@ -134,16 +171,18 @@ class DictationRuntime(QObject):
         if state is AppState.IDLE:
             if not self._can_start():
                 return
+            if self._prepare_recording is not None and not self._prepare_recording():
+                return
             self._tray.set_recording_mode(mode)
             self._controller.start_recording(mode)
         elif state is AppState.RECORDING:
-            self._hold_active = False
+            self._hold_mode = None
             self._controller.stop_recording()
         else:
             self._overlay.show_busy()
 
     def _cancel(self) -> None:
-        self._hold_active = False
+        self._hold_mode = None
         if self._controller.state is AppState.ERROR_WITH_TRANSCRIPT:
             self._controller.discard_recoverable_transcript()
             return
@@ -161,7 +200,9 @@ class DictationRuntime(QObject):
         result: DeliveryResult,
         word_count: int,
     ) -> None:
-        if mode is DeliveryMode.COPY or result.method.value == "clipboard_copy":
+        if mode is DeliveryMode.MARKDOWN:
+            self._overlay.show_saved(word_count=word_count)
+        elif mode is DeliveryMode.COPY or result.method.value == "clipboard_copy":
             self._overlay.show_copied(word_count=word_count)
         else:
             self._overlay.show_inserted(word_count=word_count)
@@ -169,5 +210,5 @@ class DictationRuntime(QObject):
     def _can_start(self) -> bool:
         if self._enabled:
             return True
-        self._overlay.show_error("Close Settings to start dictation")
+        self._overlay.show_error("Dictation unavailable")
         return False

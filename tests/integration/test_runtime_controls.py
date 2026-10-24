@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+import pytest
 from PySide6.QtCore import QObject, Signal
 
 from cursor_dictation.application.controller import DictationController
@@ -26,6 +27,9 @@ class FakeHotkeys(QObject):
     hold_released = Signal()
     toggle_pressed = Signal()
     copy_pressed = Signal()
+    copy_released = Signal()
+    markdown_pressed = Signal()
+    markdown_released = Signal()
     cancel_pressed = Signal()
 
 
@@ -85,13 +89,14 @@ class FakeDelivery:
         return DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY)
 
 
-def make_runtime(qtbot):  # type: ignore[no-untyped-def]
+def make_runtime(qtbot, save_markdown=None):  # type: ignore[no-untyped-def]
     recorder = FakeRecorder()
     queue = FakeQueue()
     controller = DictationController(
         recorder=recorder,
         transcription_queue=queue,
         delivery=FakeDelivery(),
+        save_markdown=save_markdown,
         vocabulary=lambda: (),
         selected_device=lambda: None,
         session_ids=iter(("one", "two", "three", "four")).__next__,
@@ -110,19 +115,27 @@ def make_runtime(qtbot):  # type: ignore[no-untyped-def]
     return runtime, controller, recorder, queue, hotkeys, tray, overlay
 
 
-def test_hold_to_talk_starts_on_press_and_stops_on_release(qtbot) -> None:  # type: ignore[no-untyped-def]
+@pytest.mark.parametrize(
+    "binding,mode",
+    [
+        ("hold", DeliveryMode.INSERT),
+        ("copy", DeliveryMode.COPY),
+        ("markdown", DeliveryMode.MARKDOWN),
+    ],
+)
+def test_hold_to_talk_starts_on_press_and_stops_on_release(qtbot, binding, mode) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, queue, hotkeys, _, _ = make_runtime(qtbot)
 
-    hotkeys.hold_pressed.emit()
+    getattr(hotkeys, f"{binding}_pressed").emit()
     qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     assert controller.state is AppState.RECORDING
-    hotkeys.hold_released.emit()
+    getattr(hotkeys, f"{binding}_released").emit()
     qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
 
     assert controller.state is AppState.TRANSCRIBING
     assert recorder.starts == 1
     assert recorder.stops == 1
-    assert queue.requests[0].delivery_mode is DeliveryMode.INSERT
+    assert queue.requests[0].delivery_mode is mode
     runtime.close()
 
 
@@ -138,13 +151,13 @@ def test_global_hotkey_signal_returns_before_microphone_work_starts(qtbot) -> No
     runtime.close()
 
 
-def test_toggle_and_copy_shortcuts_use_separate_delivery_modes(qtbot) -> None:  # type: ignore[no-untyped-def]
+def test_copy_shortcut_transcribes_on_release(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, _, queue, hotkeys, _, _ = make_runtime(qtbot)
 
     hotkeys.copy_pressed.emit()
     qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
     assert controller.state is AppState.RECORDING
-    hotkeys.copy_pressed.emit()
+    hotkeys.copy_released.emit()
     qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
 
     assert queue.requests[0].delivery_mode is DeliveryMode.COPY
@@ -215,16 +228,16 @@ def test_busy_shortcut_does_not_queue_another_recording(qtbot) -> None:  # type:
     runtime.close()
 
 
-def test_disabled_runtime_rejects_hotkeys_while_settings_are_open(qtbot) -> None:  # type: ignore[no-untyped-def]
+def test_disabled_runtime_rejects_hotkeys(qtbot) -> None:  # type: ignore[no-untyped-def]
     runtime, controller, recorder, _, hotkeys, _, overlay = make_runtime(qtbot)
     runtime.set_enabled(False)
 
     hotkeys.toggle_pressed.emit()
-    qtbot.waitUntil(lambda: overlay.status_text == "SETTINGS ARE OPEN")
+    qtbot.waitUntil(lambda: overlay.status_text == "DICTATION UNAVAILABLE")
 
     assert controller.state is AppState.IDLE
     assert recorder.starts == 0
-    assert overlay.status_text == "SETTINGS ARE OPEN"
+    assert overlay.status_text == "DICTATION UNAVAILABLE"
     runtime.close()
 
 
@@ -272,4 +285,59 @@ def test_cancel_discards_a_recoverable_transcript(qtbot) -> None:  # type: ignor
     assert controller.state is AppState.IDLE
     assert controller.last_transcript is None
     assert tray.start_action.isEnabled()
+    runtime.close()
+
+
+def test_markdown_shortcut_saves_file_on_release(qtbot, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from cursor_dictation.output.markdown import save_markdown
+
+    runtime, controller, _, queue, hotkeys, tray, overlay = make_runtime(
+        qtbot, save_markdown=lambda text: save_markdown(text, str(tmp_path))
+    )
+    hotkeys.markdown_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    assert tray.markdown_action.text() == "Stop and save Markdown"
+    hotkeys.markdown_released.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
+    assert queue.requests[-1].delivery_mode is DeliveryMode.MARKDOWN
+    controller._transcription_succeeded(queue.requests[-1].session_id, Transcript("Saved note"))
+    assert controller.state is AppState.IDLE
+    assert overlay.status_text == "SAVED"
+    assert next(tmp_path.glob("*.md")).read_text() == "Saved note\n"
+    runtime.close()
+
+
+@pytest.mark.parametrize("binding", ["hold", "copy", "markdown"])
+def test_other_shortcut_release_and_repeated_press_leave_recording_active(qtbot, binding) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, recorder, queue, hotkeys, _, _ = make_runtime(qtbot)
+    getattr(hotkeys, f"{binding}_pressed").emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    getattr(hotkeys, f"{binding}_pressed").emit()
+    for other in ("hold", "copy", "markdown"):
+        if other != binding:
+            getattr(hotkeys, f"{other}_pressed").emit()
+            getattr(hotkeys, f"{other}_released").emit()
+    qtbot.wait(20)
+    assert controller.state is AppState.RECORDING
+    assert recorder.starts == 1
+    assert queue.requests == []
+    getattr(hotkeys, f"{binding}_released").emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.TRANSCRIBING)
+    assert recorder.stops == 1
+    runtime.close()
+
+
+@pytest.mark.parametrize("binding", ["hold", "copy", "markdown"])
+def test_release_after_cancel_does_not_transcribe(qtbot, binding) -> None:  # type: ignore[no-untyped-def]
+    runtime, controller, recorder, queue, hotkeys, _, _ = make_runtime(qtbot)
+    getattr(hotkeys, f"{binding}_pressed").emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.RECORDING)
+    hotkeys.cancel_pressed.emit()
+    qtbot.waitUntil(lambda: controller.state is AppState.IDLE)
+    getattr(hotkeys, f"{binding}_released").emit()
+    qtbot.wait(20)
+    assert controller.state is AppState.IDLE
+    assert recorder.cancels == 1
+    assert recorder.stops == 0
+    assert queue.requests == []
     runtime.close()

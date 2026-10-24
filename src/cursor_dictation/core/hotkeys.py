@@ -25,6 +25,7 @@ class HotkeyBindings:
     toggle: Hotkey
     copy: Hotkey
     cancel: Hotkey
+    markdown: Hotkey = Hotkey(3, 77, "Ctrl+Alt+M")
 
     @classmethod
     def defaults(cls) -> HotkeyBindings:
@@ -91,7 +92,7 @@ def parse_hotkey(text: str) -> Hotkey:
 
 
 def ensure_unique(bindings: HotkeyBindings) -> None:
-    values = (bindings.hold, bindings.toggle, bindings.copy, bindings.cancel)
+    values = (bindings.hold, bindings.toggle, bindings.copy, bindings.cancel, bindings.markdown)
     signatures = {(hotkey.modifiers, hotkey.virtual_key) for hotkey in values}
     if len(signatures) != len(values):
         raise ValueError("Hotkey bindings contain a duplicate shortcut.")

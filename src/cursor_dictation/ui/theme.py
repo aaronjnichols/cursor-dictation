@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtWidgets import QApplication, QProxyStyle, QStyle, QStyleOption, QWidget
+
 
 @dataclass(frozen=True, slots=True)
 class ThemeColors:
@@ -19,9 +23,91 @@ class ThemeColors:
 
 
 COLORS = ThemeColors()
+_PALETTE_ACCENTS = {
+    "warm_white": "#DEDAD0",
+    "chamber": COLORS.primary,
+}
 
 
-def build_stylesheet() -> str:
+def palette_accent(palette: str) -> str:
+    try:
+        return _PALETTE_ACCENTS[palette]
+    except KeyError as error:
+        raise ValueError(f"Unknown theme palette: {palette}") from error
+
+
+def _active_palette() -> str:
+    application = QApplication.instance()
+    if isinstance(application, QApplication):
+        palette = application.property("cursorDictationPalette")
+        if isinstance(palette, str) and palette in _PALETTE_ACCENTS:
+            return palette
+    return "warm_white"
+
+
+class ThemeStyle(QProxyStyle):
+    """Small custom-drawing additions that Qt stylesheets cannot express."""
+
+    def drawPrimitive(
+        self,
+        element: QStyle.PrimitiveElement,
+        option: QStyleOption,
+        painter: QPainter,
+        widget: QWidget | None = None,
+    ) -> None:
+        if element == QStyle.PrimitiveElement.PE_IndicatorCheckBox:
+            self._draw_checkbox(option, painter)
+            return
+        super().drawPrimitive(element, option, painter, widget)
+
+    @staticmethod
+    def _draw_checkbox(option: QStyleOption, painter: QPainter) -> None:
+        rect = option.rect
+        enabled = bool(option.state & QStyle.StateFlag.State_Enabled)
+        checked = bool(option.state & QStyle.StateFlag.State_On)
+        hovered = bool(option.state & QStyle.StateFlag.State_MouseOver)
+
+        accent = palette_accent(_active_palette())
+        border_color = accent if checked or hovered else COLORS.border
+        fill_color = COLORS.active if checked else COLORS.raised
+        if not enabled:
+            border_color = COLORS.inactive
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(QColor(border_color), 1.6))
+        fill = QColor(fill_color)
+        if not enabled:
+            fill.setAlpha(100)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(QRectF(rect).adjusted(1, 1, -1, -1), 4, 4)
+
+        if checked:
+            check_color = accent if enabled else COLORS.inactive
+            check_pen = QPen(QColor(check_color), 1.8)
+            check_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            check_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(check_pen)
+            path = QPainterPath()
+            path.moveTo(rect.left() + 4, rect.center().y())
+            path.lineTo(rect.left() + 7, rect.bottom() - 4)
+            path.lineTo(rect.right() - 3, rect.top() + 4)
+            painter.drawPath(path)
+        painter.restore()
+
+
+def apply_theme(application: QApplication, palette: str = "warm_white") -> None:
+    """Install the shared theme once, including custom checkbox drawing."""
+    palette_accent(palette)
+    if not bool(application.property("cursorDictationThemeInstalled")):
+        application.setStyle(ThemeStyle(application.style()))
+        application.setProperty("cursorDictationThemeInstalled", True)
+    application.setProperty("cursorDictationPalette", palette)
+    application.setStyleSheet(build_stylesheet(palette))
+
+
+def build_stylesheet(palette: str = "warm_white") -> str:
+    accent = palette_accent(palette)
     return f"""
     * {{
         font-family: "Segoe UI", sans-serif;
@@ -29,13 +115,16 @@ def build_stylesheet() -> str:
         color: {COLORS.foreground};
     }}
     QWidget {{
-        background-color: {COLORS.background};
+        background-color: transparent;
     }}
     QWidget#statusOverlay, QWidget#overlayPanel, QWidget#overlayVisual,
     QWidget#overlayVisualHost, QStackedWidget#overlayVisualStack {{
         background-color: transparent;
     }}
     QMainWindow, QDialog {{
+        background-color: {COLORS.background};
+    }}
+    QMainWindow#settingsWindow, QWidget#settingsRoot {{
         background-color: {COLORS.background};
     }}
     QFrame#card, QFrame#overlayCard {{
@@ -63,7 +152,7 @@ def build_stylesheet() -> str:
         color: {COLORS.danger};
     }}
     QLabel#statusWaveform {{
-        color: {COLORS.primary};
+        color: {accent};
         font-size: 15px;
         font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
     }}
@@ -73,7 +162,7 @@ def build_stylesheet() -> str:
         font-family: "Cascadia Mono", "Consolas", monospace;
     }}
     QLabel#overlayCode {{
-        color: {COLORS.primary};
+        color: {accent};
         font-size: 9px;
         font-weight: 600;
     }}
@@ -139,8 +228,8 @@ def build_stylesheet() -> str:
     }}
     QPushButton#primaryButton {{
         color: {COLORS.background};
-        background-color: {COLORS.primary};
-        border-color: {COLORS.primary};
+        background-color: {accent};
+        border-color: {accent};
         font-weight: 600;
     }}
     QLineEdit, QComboBox, QTextEdit, QListWidget {{
@@ -148,8 +237,15 @@ def build_stylesheet() -> str:
         border: 1px solid {COLORS.border};
         border-radius: 7px;
         padding: 6px;
-        selection-background-color: {COLORS.primary};
+        selection-background-color: {accent};
         selection-color: {COLORS.background};
+    }}
+    QComboBox QAbstractItemView {{
+        background-color: {COLORS.raised};
+        color: {COLORS.foreground};
+        border: 1px solid {COLORS.border};
+        selection-background-color: {COLORS.active};
+        selection-color: {COLORS.foreground};
     }}
     QListWidget#settingsNavigation {{
         background-color: transparent;
@@ -162,7 +258,7 @@ def build_stylesheet() -> str:
         border-radius: 7px;
     }}
     QListWidget#settingsNavigation::item:selected {{
-        color: {COLORS.primary};
+        color: {accent};
         background-color: {COLORS.raised};
     }}
     QProgressBar {{
@@ -175,20 +271,16 @@ def build_stylesheet() -> str:
     }}
     QProgressBar::chunk {{
         border-radius: 3px;
-        background-color: {COLORS.primary};
+        background-color: {accent};
     }}
-    QCheckBox::indicator {{
-        width: 16px;
-        height: 16px;
+    QCheckBox {{
+        spacing: 9px;
+        min-height: 24px;
     }}
-    QCheckBox::indicator:unchecked {{
-        background-color: {COLORS.raised};
-        border: 1px solid {COLORS.border};
-        border-radius: 4px;
+    QCheckBox:hover {{
+        color: {COLORS.foreground};
     }}
-    QCheckBox::indicator:checked {{
-        background-color: {COLORS.primary};
-        border: 1px solid {COLORS.primary};
-        border-radius: 4px;
+    QCheckBox:disabled {{
+        color: {COLORS.muted};
     }}
     """

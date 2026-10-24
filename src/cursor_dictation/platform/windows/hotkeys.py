@@ -77,12 +77,16 @@ class WindowsHotkeyService(QObject):
     hold_released = Signal()
     toggle_pressed = Signal()
     copy_pressed = Signal()
+    copy_released = Signal()
+    markdown_pressed = Signal()
+    markdown_released = Signal()
     cancel_pressed = Signal()
 
     _HOLD_ID = 4100
     _TOGGLE_ID = 4101
     _COPY_ID = 4102
     _CANCEL_ID = 4103
+    _MARKDOWN_ID = 4104
 
     def __init__(self) -> None:
         super().__init__()
@@ -91,7 +95,7 @@ class WindowsHotkeyService(QObject):
         _configure_win32_signatures(self._user32, self._kernel32)
         self._bindings: HotkeyBindings | None = None
         self._registered_ids: list[int] = []
-        self._hold_down = False
+        self._held_keys: dict[int, Callable[[], None]] = {}
         self._hook: int | None = None
         self._hook_callback: object | None = None
         self._native_filter = _NativeFilter(self._handle_registered_hotkey)
@@ -120,7 +124,7 @@ class WindowsHotkeyService(QObject):
             self._user32.UnhookWindowsHookEx(self._hook)
             self._hook = None
         self._hook_callback = None
-        self._hold_down = False
+        self._held_keys.clear()
         self._bindings = None
 
     def _apply(self, bindings: HotkeyBindings) -> None:
@@ -128,6 +132,7 @@ class WindowsHotkeyService(QObject):
             (self._HOLD_ID, bindings.hold),
             (self._TOGGLE_ID, bindings.toggle),
             (self._COPY_ID, bindings.copy),
+            (self._MARKDOWN_ID, bindings.markdown),
             (self._CANCEL_ID, bindings.cancel),
         )
         for hotkey_id, hotkey in registered:
@@ -140,28 +145,35 @@ class WindowsHotkeyService(QObject):
             if not result:
                 raise HotkeyRegistrationError(f"Windows rejected the {hotkey.canonical} shortcut.")
             self._registered_ids.append(hotkey_id)
-        self._install_hold_hook(bindings.hold)
+        self._install_hold_hook(bindings)
         self._bindings = bindings
 
-    def _install_hold_hook(self, hold: Hotkey) -> None:
+    def _install_hold_hook(self, bindings: HotkeyBindings) -> None:
+        shortcuts = (
+            (bindings.hold, self.hold_pressed.emit, self.hold_released.emit),
+            (bindings.copy, self.copy_pressed.emit, self.copy_released.emit),
+            (bindings.markdown, self.markdown_pressed.emit, self.markdown_released.emit),
+        )
+
         def callback(code: int, message: int, data_pointer: int) -> int:
             if code >= 0:
                 data = ctypes.cast(
                     data_pointer,
                     ctypes.POINTER(KBDLLHOOKSTRUCT),
                 ).contents
-                if data.vkCode == hold.virtual_key:
-                    if message in {WM_KEYDOWN, WM_SYSKEYDOWN}:
-                        if self._hold_down:
-                            return 1
-                        if self._modifiers_are_down(hold.modifiers):
-                            self._hold_down = True
-                            self.hold_pressed.emit()
-                            return 1
-                    elif message in {WM_KEYUP, WM_SYSKEYUP} and self._hold_down:
-                        self._hold_down = False
-                        self.hold_released.emit()
+                key = int(data.vkCode)
+                if key in self._held_keys:
+                    if message in {WM_KEYUP, WM_SYSKEYUP}:
+                        self._held_keys.pop(key)()
                         return 1
+                    if message in {WM_KEYDOWN, WM_SYSKEYDOWN}:
+                        return 1
+                elif message in {WM_KEYDOWN, WM_SYSKEYDOWN}:
+                    for hotkey, pressed, released in shortcuts:
+                        if key == hotkey.virtual_key and self._modifiers_are_down(hotkey.modifiers):
+                            self._held_keys[key] = released
+                            pressed()
+                            return 1
             return int(self._user32.CallNextHookEx(self._hook, code, message, data_pointer))
 
         self._hook_callback = LowLevelKeyboardProc(callback)
@@ -192,8 +204,6 @@ class WindowsHotkeyService(QObject):
     def _handle_registered_hotkey(self, hotkey_id: int) -> None:
         if hotkey_id == self._TOGGLE_ID:
             self.toggle_pressed.emit()
-        elif hotkey_id == self._COPY_ID:
-            self.copy_pressed.emit()
         elif hotkey_id == self._CANCEL_ID:
             self.cancel_pressed.emit()
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from cursor_dictation.core.hotkeys import HotkeyParseError, parse_hotkey
+from cursor_dictation.output.markdown import validate_frontmatter
 
 CURRENT_SCHEMA_VERSION = 2
 
@@ -13,9 +14,10 @@ _HOTKEY_FIELDS = (
     "hold_to_talk_hotkey",
     "toggle_recording_hotkey",
     "record_and_copy_hotkey",
+    "record_to_markdown_hotkey",
     "cancel_hotkey",
 )
-_OPTIONAL_TEXT_FIELDS = ("microphone_device_id", "model_path")
+_OPTIONAL_TEXT_FIELDS = ("microphone_device_id", "model_path", "markdown_folder")
 _BOOLEAN_FIELDS = ("sound_cues_enabled", "history_enabled", "launch_at_sign_in")
 
 
@@ -30,6 +32,9 @@ class AppSettings:
     hold_to_talk_hotkey: str = "Ctrl+Alt+Space"
     toggle_recording_hotkey: str = "Ctrl+Alt+D"
     record_and_copy_hotkey: str = "Ctrl+Alt+C"
+    record_to_markdown_hotkey: str = "Ctrl+Alt+M"
+    markdown_folder: str | None = None
+    markdown_frontmatter: str = ""
     cancel_hotkey: str = "Ctrl+Alt+Escape"
     microphone_device_id: str | None = None
     model_path: str | None = None
@@ -40,6 +45,7 @@ class AppSettings:
     overlay_palette: str = "warm_white"
 
     def __post_init__(self) -> None:
+        validate_frontmatter(self.markdown_frontmatter)
         if self.overlay_palette not in {"warm_white", "chamber"}:
             raise ValueError("overlay_palette must be warm_white or chamber")
         if type(self.schema_version) is not int:
@@ -81,6 +87,9 @@ class AppSettings:
             "hold_to_talk_hotkey": self.hold_to_talk_hotkey,
             "toggle_recording_hotkey": self.toggle_recording_hotkey,
             "record_and_copy_hotkey": self.record_and_copy_hotkey,
+            "record_to_markdown_hotkey": self.record_to_markdown_hotkey,
+            "markdown_folder": self.markdown_folder,
+            "markdown_frontmatter": self.markdown_frontmatter,
             "cancel_hotkey": self.cancel_hotkey,
             "microphone_device_id": self.microphone_device_id,
             "model_path": self.model_path,
@@ -106,6 +115,9 @@ class AppSettings:
             hold_to_talk_hotkey=_string_value(combined, "hold_to_talk_hotkey"),
             toggle_recording_hotkey=_string_value(combined, "toggle_recording_hotkey"),
             record_and_copy_hotkey=_string_value(combined, "record_and_copy_hotkey"),
+            record_to_markdown_hotkey=_string_value(combined, "record_to_markdown_hotkey"),
+            markdown_folder=_optional_string_value(combined, "markdown_folder"),
+            markdown_frontmatter=_string_value(combined, "markdown_frontmatter"),
             cancel_hotkey=_string_value(combined, "cancel_hotkey"),
             microphone_device_id=_optional_string_value(combined, "microphone_device_id"),
             model_path=_optional_string_value(combined, "model_path"),

@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 from threading import Event, Timer
 
+import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QApplication
 
@@ -171,6 +172,9 @@ class FakeHotkeys(QObject):
     hold_released = Signal()
     toggle_pressed = Signal()
     copy_pressed = Signal()
+    copy_released = Signal()
+    markdown_pressed = Signal()
+    markdown_released = Signal()
     cancel_pressed = Signal()
 
     def __init__(self) -> None:
@@ -902,7 +906,7 @@ def test_startup_registry_failure_does_not_block_dictation_runtime(qtbot, tmp_pa
     coordinator.close()
 
 
-def test_settings_cannot_open_during_recording_or_transcription(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
+def test_settings_can_open_during_recording_or_transcription(qtbot, tmp_path: Path) -> None:  # type: ignore[no-untyped-def]
     transcribe_gate = Event()
     coordinator, hotkeys, _, _, _ = make_coordinator(
         tmp_path,
@@ -920,7 +924,7 @@ def test_settings_cannot_open_during_recording_or_transcription(qtbot, tmp_path:
     coordinator.show_settings()
 
     assert coordinator.state is AppState.RECORDING
-    assert not coordinator.settings_window.isVisible()
+    assert coordinator.settings_window.isVisible()
     hotkeys.toggle_pressed.emit()
     qtbot.waitUntil(lambda: coordinator.state is AppState.TRANSCRIBING)
     assert coordinator.state is AppState.TRANSCRIBING
@@ -928,7 +932,7 @@ def test_settings_cannot_open_during_recording_or_transcription(qtbot, tmp_path:
     coordinator.show_settings()
 
     assert coordinator.state is AppState.TRANSCRIBING
-    assert not coordinator.settings_window.isVisible()
+    assert coordinator.settings_window.isVisible()
     transcribe_gate.set()
     coordinator.close()
 
@@ -1174,4 +1178,63 @@ def test_settings_microphone_test_timeout_reports_completion(
     assert recorder.cancel_count == 1
     assert coordinator.settings_window.status_text == "Microphone test complete"
     assert coordinator.settings_window.test_microphone_button.text() == "Test microphone"
+    coordinator.close()
+
+
+@pytest.mark.parametrize("shortcut", ["hold", "copy", "markdown"])
+def test_settings_stays_open_while_hotkeys_record(qtbot, tmp_path, shortcut):  # type: ignore[no-untyped-def]
+    coordinator, hotkeys, _, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.tray.settings_action.trigger()
+    qtbot.waitUntil(coordinator.settings_window.isVisible)
+    assert coordinator.state is AppState.IDLE
+    getattr(hotkeys, f"{shortcut}_pressed").emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
+    assert coordinator.settings_window.isVisible()
+    coordinator.settings_window.close()
+    assert coordinator.state is AppState.RECORDING
+    getattr(hotkeys, f"{shortcut}_released").emit()
+    qtbot.waitUntil(lambda: coordinator.state is not AppState.RECORDING)
+    coordinator.close()
+
+
+def test_tray_settings_restores_minimized_window_and_keeps_edits(qtbot, tmp_path):  # type: ignore[no-untyped-def]
+    coordinator, _, _, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.tray.settings_action.trigger()
+    qtbot.waitUntil(coordinator.settings_window.isVisible)
+    coordinator.settings_window.vocabulary_editor.setPlainText("Unsaved term")
+    coordinator.settings_window.showMinimized()
+    assert coordinator.settings_window.isMinimized()
+    coordinator.tray.settings_action.trigger()
+    qtbot.waitUntil(lambda: not coordinator.settings_window.isMinimized())
+    assert coordinator.settings_window.isVisible()
+    assert coordinator.settings_window.vocabulary_editor.toPlainText() == "Unsaved term"
+    coordinator.close()
+
+
+def test_recording_takes_over_microphone_test_and_blocks_settings_save(qtbot, tmp_path):  # type: ignore[no-untyped-def]
+    coordinator, hotkeys, settings_store, _, _ = make_coordinator(tmp_path, installed=True)
+    qtbot.addWidget(coordinator.settings_window)
+    qtbot.addWidget(coordinator.overlay)
+    coordinator.start()
+    coordinator.show_settings()
+    coordinator.settings_window.test_microphone_button.click()
+    assert coordinator._microphone_test_active
+    hotkeys.copy_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.RECORDING)
+    assert not coordinator._microphone_test_active
+    coordinator.settings_window.hold_hotkey.setText("Ctrl+Shift+Space")
+    coordinator.save_settings()
+    assert settings_store.load().hold_to_talk_hotkey == "Ctrl+Alt+Space"
+    assert "Finish dictation" in coordinator.settings_window.status_text
+    coordinator.settings_window.test_microphone_button.click()
+    assert not coordinator._microphone_test_active
+    assert coordinator.state is AppState.RECORDING
+    hotkeys.cancel_pressed.emit()
+    qtbot.waitUntil(lambda: coordinator.state is AppState.IDLE)
     coordinator.close()

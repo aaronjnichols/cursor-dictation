@@ -7,6 +7,7 @@ from typing import cast
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -32,6 +33,7 @@ from cursor_dictation.settings.history import HistoryRecord
 from cursor_dictation.settings.schema import AppSettings, ModelSource
 from cursor_dictation.settings.vocabulary import parse_vocabulary
 from cursor_dictation.ui.icons import make_app_icon
+from cursor_dictation.ui.theme import apply_theme
 
 
 class SettingsWindow(QMainWindow):
@@ -48,11 +50,16 @@ class SettingsWindow(QMainWindow):
         "Model",
         "Vocabulary",
         "History",
+        "Markdown",
         "About",
     )
 
     def __init__(self) -> None:
         super().__init__()
+        application = QApplication.instance()
+        if isinstance(application, QApplication):
+            apply_theme(application)
+        self.setObjectName("settingsWindow")
         self._model_source = ModelSource.RECOMMENDED
         self._editing_enabled = True
         self.setWindowTitle("Cursor Dictation settings")
@@ -60,6 +67,7 @@ class SettingsWindow(QMainWindow):
         self.resize(760, 540)
 
         root = QWidget()
+        root.setObjectName("settingsRoot")
         root_layout = QVBoxLayout(root)
         root_layout.setContentsMargins(20, 20, 20, 16)
 
@@ -115,6 +123,9 @@ class SettingsWindow(QMainWindow):
         self.hold_hotkey.setText(settings.hold_to_talk_hotkey)
         self.toggle_hotkey.setText(settings.toggle_recording_hotkey)
         self.copy_hotkey.setText(settings.record_and_copy_hotkey)
+        self.markdown_hotkey.setText(settings.record_to_markdown_hotkey)
+        self.markdown_folder.setText(settings.markdown_folder or "")
+        self.markdown_frontmatter.setPlainText(settings.markdown_frontmatter)
         self.cancel_hotkey.setText(settings.cancel_hotkey)
         self.sound_cues.setChecked(settings.sound_cues_enabled)
         self.history_enabled.setChecked(settings.history_enabled)
@@ -144,6 +155,9 @@ class SettingsWindow(QMainWindow):
             hold_to_talk_hotkey=self.hold_hotkey.text().strip(),
             toggle_recording_hotkey=self.toggle_hotkey.text().strip(),
             record_and_copy_hotkey=self.copy_hotkey.text().strip(),
+            record_to_markdown_hotkey=self.markdown_hotkey.text().strip(),
+            markdown_folder=self.markdown_folder.text().strip() or None,
+            markdown_frontmatter=self.markdown_frontmatter.toPlainText(),
             cancel_hotkey=self.cancel_hotkey.text().strip(),
             microphone_device_id=device_id,
             model_path=model_path,
@@ -214,6 +228,19 @@ class SettingsWindow(QMainWindow):
         if isinstance(text, str):
             self.copy_history_requested.emit(text)
 
+    def _choose_markdown_folder(self) -> None:
+        directory = QFileDialog.getExistingDirectory(
+            self, "Choose Markdown destination folder", self.markdown_folder.text()
+        )
+        if directory:
+            self.markdown_folder.setText(directory)
+
+    def _preview_palette(self) -> None:
+        application = QApplication.instance()
+        palette = self.overlay_palette.currentData()
+        if isinstance(application, QApplication) and isinstance(palette, str):
+            apply_theme(application, palette)
+
     def _choose_model(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self,
@@ -237,6 +264,7 @@ class SettingsWindow(QMainWindow):
         self.overlay_palette = QComboBox()
         self.overlay_palette.addItem("Warm White", "warm_white")
         self.overlay_palette.addItem("Chamber", "chamber")
+        self.overlay_palette.currentIndexChanged.connect(self._preview_palette)
         appearance_form = QFormLayout()
         appearance_form.addRow("Dictation grid palette", self.overlay_palette)
         self.stack.addWidget(
@@ -250,11 +278,13 @@ class SettingsWindow(QMainWindow):
         self.hold_hotkey = QLineEdit("Ctrl+Alt+Space")
         self.toggle_hotkey = QLineEdit("Ctrl+Alt+D")
         self.copy_hotkey = QLineEdit("Ctrl+Alt+C")
+        self.markdown_hotkey = QLineEdit("Ctrl+Alt+M")
         self.cancel_hotkey = QLineEdit("Ctrl+Alt+Escape")
         hotkey_form = QFormLayout()
-        hotkey_form.addRow("Hold to talk", self.hold_hotkey)
+        hotkey_form.addRow("Hold to talk and insert", self.hold_hotkey)
         hotkey_form.addRow("Toggle recording", self.toggle_hotkey)
-        hotkey_form.addRow("Record and copy", self.copy_hotkey)
+        hotkey_form.addRow("Hold to talk and copy", self.copy_hotkey)
+        hotkey_form.addRow("Hold to talk and save Markdown", self.markdown_hotkey)
         hotkey_form.addRow("Cancel", self.cancel_hotkey)
         self.stack.addWidget(
             self._page("Hotkeys", "Shortcuts work across Windows.", (hotkey_form,))
@@ -323,6 +353,28 @@ class SettingsWindow(QMainWindow):
                     self.copy_history_button,
                     self.clear_history_button,
                 ),
+            )
+        )
+
+        self.markdown_folder = QLineEdit()
+        self.markdown_folder.setPlaceholderText("Choose a folder, including any folder in a vault")
+        self.choose_markdown_folder_button = QPushButton("Choose folder")
+        self.choose_markdown_folder_button.clicked.connect(self._choose_markdown_folder)
+        self.markdown_frontmatter = QTextEdit()
+        self.markdown_frontmatter.setPlaceholderText(
+            "tags: [dictation]\ntype: voice-note\nstatus: inbox"
+        )
+        markdown_form = QFormLayout()
+        markdown_form.addRow("Destination folder", self.markdown_folder)
+        markdown_form.addRow("YAML properties (optional)", self.markdown_frontmatter)
+        self.stack.addWidget(
+            self._page(
+                "Markdown",
+                "Record to Markdown saves each transcript as a new timestamped .md file. "
+                "Enter properties without the --- lines. "
+                "Leave properties blank for plain Markdown. "
+                "These files are saved even when transcript history is off.",
+                (markdown_form, self.choose_markdown_folder_button),
             )
         )
 

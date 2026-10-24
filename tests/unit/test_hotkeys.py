@@ -115,9 +115,11 @@ def test_hold_hotkey_conflict_is_detected_before_installing_hook(
     assert user32.hook_install_count == 0
 
 
+@pytest.mark.parametrize("binding", ["hold", "copy", "markdown"])
 def test_hold_hook_consumes_owned_chord_but_chains_unrelated_keys(
     qapp,
     monkeypatch,
+    binding,
 ) -> None:  # type: ignore[no-untyped-def]
     class FakeUser32:
         def __init__(self) -> None:
@@ -156,16 +158,17 @@ def test_hold_hook_consumes_owned_chord_but_chains_unrelated_keys(
     bindings = HotkeyBindings.defaults()
     pressed: list[bool] = []
     released: list[bool] = []
-    service.hold_pressed.connect(lambda: pressed.append(True))
-    service.hold_released.connect(lambda: released.append(True))
+    getattr(service, f"{binding}_pressed").connect(lambda: pressed.append(True))
+    getattr(service, f"{binding}_released").connect(lambda: released.append(True))
     service.configure(bindings)
     callback = user32.callback
     assert callback is not None
-    owned = KBDLLHOOKSTRUCT(vkCode=bindings.hold.virtual_key)
+    owned = KBDLLHOOKSTRUCT(vkCode=getattr(bindings, binding).virtual_key)
 
     assert callback(0, WM_KEYDOWN, ctypes.addressof(owned)) == 1
     assert callback(0, WM_KEYDOWN, ctypes.addressof(owned)) == 1
     assert pressed == [True]
+    user32.modifiers_down = False
     assert callback(0, WM_KEYUP, ctypes.addressof(owned)) == 1
     assert released == [True]
 
@@ -174,4 +177,16 @@ def test_hold_hook_consumes_owned_chord_but_chains_unrelated_keys(
     user32.modifiers_down = False
     assert callback(0, WM_KEYDOWN, ctypes.addressof(owned)) == 77
     assert user32.chained == 2
+    service.close()
+
+
+def test_registered_hold_messages_do_not_duplicate_hook_presses(qapp) -> None:  # type: ignore[no-untyped-def]
+    service = WindowsHotkeyService()
+    pressed: list[bool] = []
+    service.hold_pressed.connect(lambda: pressed.append(True))
+    service.copy_pressed.connect(lambda: pressed.append(True))
+    service.markdown_pressed.connect(lambda: pressed.append(True))
+    for hotkey_id in (service._HOLD_ID, service._COPY_ID, service._MARKDOWN_ID):
+        service._handle_registered_hotkey(hotkey_id)
+    assert pressed == []
     service.close()

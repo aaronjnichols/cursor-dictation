@@ -393,6 +393,9 @@ class StatusOverlay(QWidget):
     def show_copied(self, *, word_count: int | None = None) -> None:
         self._show_completion_feedback("COPIED", word_count, 1400)
 
+    def show_saved(self, *, word_count: int | None = None) -> None:
+        self._show_completion_feedback("SAVED", word_count, 1400)
+
     def show_inserted(self, *, word_count: int | None = None) -> None:
         self._show_completion_feedback("INSERTED", word_count, 1400)
 

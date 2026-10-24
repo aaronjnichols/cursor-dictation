@@ -86,6 +86,7 @@ def make_controller(
     vocabulary: Callable[[], Sequence[str]] | None = None,
     observer_error: Callable[[Exception], None] | None = None,
     history: FakeHistory | None = None,
+    save_markdown: Callable[[str], DeliveryResult] | None = None,
     completion_listener: Callable[[DeliveryMode, DeliveryResult, int], None] | None = None,
 ) -> tuple[DictationController, FakeRecorder, FakeTranscriptionQueue, FakeDelivery]:
     recorder = FakeRecorder()
@@ -100,6 +101,7 @@ def make_controller(
         session_ids=iter(("session-1", "session-2", "session-3")).__next__,
         observer_error=observer_error,
         history=history,
+        save_markdown=save_markdown,
         completion_listener=completion_listener,
     )
     return controller, recorder, queue, delivery
@@ -353,3 +355,34 @@ def test_completion_listener_receives_mode_delivery_method_and_word_count() -> N
     queue.succeed("Copied words here.")
 
     assert completions == [(DeliveryMode.COPY, DeliveryResult.ok(DeliveryMethod.CLIPBOARD_COPY), 3)]
+
+
+def test_markdown_delivery_does_not_touch_clipboard_or_cursor() -> None:
+    saved: list[str] = []
+
+    def save(text: str) -> DeliveryResult:
+        saved.append(text)
+        return DeliveryResult.ok(DeliveryMethod.MARKDOWN_FILE)
+
+    controller, _, queue, delivery = make_controller(save_markdown=save)
+    controller.start_recording(DeliveryMode.MARKDOWN)
+    controller.stop_recording()
+    queue.succeed("A note for my vault.")
+    assert saved == ["A note for my vault."]
+    assert delivery.copied == delivery.inserted == []
+    assert controller.state is AppState.IDLE
+
+
+def test_markdown_save_failure_preserves_transcript_for_recovery() -> None:
+    def save(text: str) -> DeliveryResult:
+        raise PermissionError("Folder unavailable")
+
+    controller, _, queue, delivery = make_controller(save_markdown=save)
+    controller.start_recording(DeliveryMode.MARKDOWN)
+    controller.stop_recording()
+    queue.succeed("Do not lose these notes.")
+    assert controller.state is AppState.ERROR_WITH_TRANSCRIPT
+    assert controller.last_transcript == "Do not lose these notes."
+    assert delivery.copied == delivery.inserted == []
+    assert controller.copy_recoverable_transcript()
+    assert delivery.copied == ["Do not lose these notes."]

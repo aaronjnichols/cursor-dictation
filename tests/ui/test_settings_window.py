@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from cursor_dictation.core.models import DeliveryMode
 from cursor_dictation.settings.history import HistoryRecord
 from cursor_dictation.settings.schema import ModelSource
 from cursor_dictation.ui.settings_window import SettingsWindow
+from cursor_dictation.ui.theme import apply_theme, palette_accent
 
 
 def test_settings_window_has_all_agreed_pages(qtbot) -> None:  # type: ignore[no-untyped-def]
@@ -22,8 +23,25 @@ def test_settings_window_has_all_agreed_pages(qtbot) -> None:  # type: ignore[no
         "Model",
         "Vocabulary",
         "History",
+        "Markdown",
         "About",
     )
+    assert window.objectName() == "settingsWindow"
+    application = QApplication.instance()
+    assert application is not None
+    assert "QMainWindow#settingsWindow" in application.styleSheet()
+
+
+def test_palette_selection_previews_settings_accent(qtbot, qapp) -> None:  # type: ignore[no-untyped-def]
+    window = SettingsWindow()
+    qtbot.addWidget(window)
+
+    window.overlay_palette.setCurrentIndex(window.overlay_palette.findData("chamber"))
+    assert palette_accent("chamber") in qapp.styleSheet()
+
+    window.overlay_palette.setCurrentIndex(window.overlay_palette.findData("warm_white"))
+    assert palette_accent("warm_white") in qapp.styleSheet()
+    apply_theme(qapp, "warm_white")
 
 
 def test_settings_window_emits_save_and_close_requests(qtbot) -> None:  # type: ignore[no-untyped-def]
@@ -136,3 +154,15 @@ def test_microphone_test_control_emits_and_displays_input_level(qtbot) -> None: 
     window.set_microphone_test_active(False)
     assert window.test_microphone_button.text() == "Test microphone"
     assert window.input_level.value() == 0
+
+
+def test_markdown_folder_picker_and_properties_roundtrip(qtbot, monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    window = SettingsWindow()
+    qtbot.addWidget(window)
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", lambda *_args: str(tmp_path))
+    window.choose_markdown_folder_button.click()
+    window.markdown_frontmatter.setPlainText("tags: [dictation]\nstatus: inbox")
+    settings, _ = window.collect_settings()
+    assert settings.markdown_folder == str(tmp_path)
+    window.apply_settings(settings, vocabulary=(), devices=())
+    assert window.collect_settings()[0] == settings

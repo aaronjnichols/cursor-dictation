@@ -21,6 +21,8 @@ from cursor_dictation.core.hotkeys import HotkeyBindings, parse_hotkey
 from cursor_dictation.core.models import AppState, DeliveryMode, DeliveryResult, RecordedAudio
 from cursor_dictation.diagnostics.logging import SafeEventLogger
 from cursor_dictation.output.delivery import WindowsTextDelivery
+from cursor_dictation.output.markdown import save_markdown
+from cursor_dictation.platform.windows.foreground import restore_and_activate_window
 from cursor_dictation.platform.windows.hotkeys import WindowsHotkeyService
 from cursor_dictation.platform.windows.paths import AppPaths
 from cursor_dictation.platform.windows.startup import StartupManager
@@ -33,6 +35,7 @@ from cursor_dictation.transcription.model_manager import ModelManager, PreparedM
 from cursor_dictation.ui.settings_window import SettingsWindow
 from cursor_dictation.ui.setup_window import SetupWindow
 from cursor_dictation.ui.status_overlay import StatusOverlay
+from cursor_dictation.ui.theme import apply_theme
 from cursor_dictation.ui.tray import TrayIcon
 
 InstallerFactory = Callable[[Path], DefaultModelInstaller]
@@ -155,6 +158,7 @@ class ApplicationCoordinator:
         self.tray.show()
         try:
             self._settings = self._settings_store.load()
+            apply_theme(self._application, self._settings.overlay_palette)
             self.overlay.set_palette(self._settings.overlay_palette)
             self._vocabulary = self._vocabulary_store.load()
         except Exception as error:
@@ -201,28 +205,41 @@ class ApplicationCoordinator:
         )
 
     def show_settings(self) -> None:
-        if self.settings_window.isVisible():
-            self.settings_window.raise_()
-            self.settings_window.activateWindow()
+        if not self.settings_window.isVisible():
+            self.settings_window.set_status("")
+            self._refresh_devices()
+            self._apply_settings_to_windows()
+            self._refresh_history()
+        if self.runtime is None:
+            self._set_state(AppState.SETTINGS_OPEN)
+        self.settings_window.showNormal()
+        # Restore again after the tray menu releases focus. This also handles
+        # Windows suppressing the first show for a process launched hidden.
+        QTimer.singleShot(0, self._activate_settings)
+
+    def _activate_settings(self) -> None:
+        if self._closing:
             return
+        self.settings_window.showNormal()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
+        if self._application.platformName() == "windows":
+            restore_and_activate_window(int(self.settings_window.winId()))
+
+    def _prepare_recording(self) -> bool:
+        if self._task_runner.is_running or self._setup_model_switch:
+            self.overlay.show_error("Wait for the model change to finish")
+            return False
+        self._stop_microphone_test()
+        return True
+
+    def save_settings(self) -> None:
         if self._controller is not None and self._controller.state not in {
             AppState.IDLE,
             AppState.ERROR,
         }:
-            self.overlay.show_error("Finish the current dictation before opening Settings")
+            self.settings_window.set_status("Finish dictation before saving Settings", error=True)
             return
-        self.settings_window.set_status("")
-        self._refresh_devices()
-        self._apply_settings_to_windows()
-        self._refresh_history()
-        if self.runtime is not None:
-            self.runtime.set_enabled(False)
-        self._set_state(AppState.SETTINGS_OPEN)
-        self.settings_window.show()
-        self.settings_window.raise_()
-        self.settings_window.activateWindow()
-
-    def save_settings(self) -> None:
         self._stop_microphone_test()
         if self._fatal_transaction_error:
             self.settings_window.set_status(
@@ -561,6 +578,9 @@ class ApplicationCoordinator:
                 recorder=self._recorder,
                 transcription_queue=self._transcription_queue,
                 delivery=self._delivery,
+                save_markdown=lambda text: save_markdown(
+                    text, self._settings.markdown_folder, self._settings.markdown_frontmatter
+                ),
                 vocabulary=lambda: self._vocabulary,
                 selected_device=lambda: self._settings.microphone_device_id,
                 session_ids=lambda: uuid4().hex,
@@ -574,6 +594,7 @@ class ApplicationCoordinator:
                 hotkeys=cast(HotkeyPort, self._hotkeys),
                 tray=self.tray,
                 overlay=self.overlay,
+                prepare_recording=self._prepare_recording,
             )
             self._controller.add_state_listener(self._controller_state_changed)
         else:
@@ -639,6 +660,7 @@ class ApplicationCoordinator:
             return False
 
         self._settings = settings
+        apply_theme(self._application, settings.overlay_palette)
         self.overlay.set_palette(settings.overlay_palette)
         self._vocabulary = vocabulary
         self._history.enabled = settings.history_enabled
@@ -671,6 +693,7 @@ class ApplicationCoordinator:
     def _settings_closed(self) -> None:
         if self._closing:
             return
+        apply_theme(self._application, self._settings.overlay_palette)
         self._stop_microphone_test()
         if self._fatal_transaction_error:
             if self.runtime is not None:
@@ -687,6 +710,9 @@ class ApplicationCoordinator:
         self._set_state(next_state)
 
     def _toggle_microphone_test(self, surface: _MicrophoneTestSurface) -> None:
+        if self._controller is not None and self._controller.state is AppState.RECORDING:
+            surface.set_microphone_test_status("Finish dictation before testing the microphone")
+            return
         if self._microphone_test_active:
             self._stop_microphone_test()
             surface.set_microphone_test_status("Microphone test stopped")
@@ -812,8 +838,6 @@ class ApplicationCoordinator:
         self.overlay.set_state(state)
 
     def _controller_state_changed(self, state: AppState) -> None:
-        if self.settings_window.isVisible():
-            return
         self._state = state
         if state is AppState.RECORDING:
             if self._settings.sound_cues_enabled:
@@ -850,6 +874,7 @@ def _bindings(settings: AppSettings) -> HotkeyBindings:
         hold=parse_hotkey(settings.hold_to_talk_hotkey),
         toggle=parse_hotkey(settings.toggle_recording_hotkey),
         copy=parse_hotkey(settings.record_and_copy_hotkey),
+        markdown=parse_hotkey(settings.record_to_markdown_hotkey),
         cancel=parse_hotkey(settings.cancel_hotkey),
     )
 

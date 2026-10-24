@@ -34,6 +34,7 @@ class DictationController:
         session_ids: Callable[[], str],
         observer_error: Callable[[Exception], None] | None = None,
         history: TranscriptHistory | None = None,
+        save_markdown: Callable[[str], DeliveryResult] | None = None,
         completion_listener: Callable[[DeliveryMode, DeliveryResult, int], None] | None = None,
         initial_state: AppState = AppState.IDLE,
     ) -> None:
@@ -45,6 +46,7 @@ class DictationController:
         self._session_ids = session_ids
         self._observer_error = observer_error
         self._history = history
+        self._save_markdown = save_markdown
         self._completion_listeners: list[Callable[[DeliveryMode, DeliveryResult, int], None]] = []
         if completion_listener is not None:
             self._completion_listeners.append(completion_listener)
@@ -186,11 +188,14 @@ class DictationController:
         self.last_transcript = text
         self._move(Event.TRANSCRIPT_COMPLETED)
         try:
-            result = (
-                self._delivery.insert_at_cursor(text)
-                if mode is DeliveryMode.INSERT
-                else self._delivery.copy_to_clipboard(text)
-            )
+            if mode is DeliveryMode.MARKDOWN:
+                if self._save_markdown is None:
+                    raise ValueError("Choose a Markdown folder in Settings first.")
+                result = self._save_markdown(text)
+            elif mode is DeliveryMode.INSERT:
+                result = self._delivery.insert_at_cursor(text)
+            else:
+                result = self._delivery.copy_to_clipboard(text)
         except Exception as error:
             self.last_error = str(error)
             self._move(Event.OPERATION_FAILED)

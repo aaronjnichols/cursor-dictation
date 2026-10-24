@@ -21,12 +21,14 @@ class AppState(StrEnum):
 class DeliveryMode(StrEnum):
     INSERT = "insert"
     COPY = "copy"
+    MARKDOWN = "markdown"
 
 
 class DeliveryMethod(StrEnum):
     CLIPBOARD_PASTE = "clipboard_paste"
     CLIPBOARD_COPY = "clipboard_copy"
     UNICODE_INPUT = "unicode_input"
+    MARKDOWN_FILE = "markdown_file"
 
 
 @dataclass(frozen=True, slots=True)

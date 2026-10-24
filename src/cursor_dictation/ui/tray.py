@@ -11,6 +11,7 @@ from cursor_dictation.ui.icons import make_app_icon
 class TrayIcon(QSystemTrayIcon):
     start_insert_requested = Signal()
     start_copy_requested = Signal()
+    start_markdown_requested = Signal()
     cancel_requested = Signal()
     settings_requested = Signal()
     quit_requested = Signal()
@@ -22,6 +23,8 @@ class TrayIcon(QSystemTrayIcon):
         menu = QMenu()
         self.start_action = QAction("Start dictation", menu)
         self.copy_action = QAction("Record and copy", menu)
+        self.markdown_action = QAction("Record to Markdown", menu)
+        self.markdown_action.triggered.connect(self.start_markdown_requested.emit)
         self.cancel_action = QAction("Cancel dictation", menu)
         self.settings_action = QAction("Settings", menu)
         self.quit_action = QAction("Quit", menu)
@@ -34,6 +37,7 @@ class TrayIcon(QSystemTrayIcon):
 
         menu.addAction(self.start_action)
         menu.addAction(self.copy_action)
+        menu.addAction(self.markdown_action)
         menu.addAction(self.cancel_action)
         menu.addSeparator()
         menu.addAction(self.settings_action)
@@ -67,6 +71,11 @@ class TrayIcon(QSystemTrayIcon):
         )
         self.start_action.setEnabled(idle or insert_recording or simple_error)
         self.copy_action.setEnabled(idle or copy_recording or simple_error or transcript_recovery)
+        markdown_recording = recording and self._recording_mode is DeliveryMode.MARKDOWN
+        self.markdown_action.setText(
+            "Stop and save Markdown" if markdown_recording else "Record to Markdown"
+        )
+        self.markdown_action.setEnabled(idle or markdown_recording or simple_error)
         self.cancel_action.setEnabled(recording or transcript_recovery)
         self.settings_action.setEnabled(
             state

@@ -28,7 +28,7 @@ from cursor_dictation.transcription.faster_whisper_engine import FasterWhisperEn
 from cursor_dictation.transcription.model_manager import ModelManager
 from cursor_dictation.transcription.model_manifest import load_model_manifest
 from cursor_dictation.ui.icons import make_app_icon
-from cursor_dictation.ui.theme import build_stylesheet
+from cursor_dictation.ui.theme import apply_theme
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     application.setOrganizationName("Cursor Dictation")
     application.setQuitOnLastWindowClosed(False)
     application.setWindowIcon(make_app_icon())
-    application.setStyleSheet(build_stylesheet())
+    apply_theme(application)
 
     paths = (
         AppPaths.from_root(options.data_root) if options.data_root else AppPaths.from_environment()
